@@ -1,0 +1,9 @@
+node_modules/
+.env
+uploads/*
+!uploads/.gitkeep
+npm-debug.log
+aerosocial.db
+aerosocial.db-shm
+aerosocial.db-wal
+
