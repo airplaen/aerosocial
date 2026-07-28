@@ -1,0 +1,27 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4da3ff"/>
+      <stop offset="100%" stop-color="#8b7bff"/>
+    </linearGradient>
+    <radialGradient id="vignette" cx="30%" cy="25%" r="90%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.16"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bg)"/>
+  <rect x="0" y="0" width="512" height="512" fill="url(#vignette)"/>
+
+  <!-- flight trail (social "pings" fading away) -->
+  <circle cx="112" cy="404" r="9" fill="#ffffff" opacity="0.20"/>
+  <circle cx="146" cy="372" r="13" fill="#ffffff" opacity="0.30"/>
+  <circle cx="184" cy="338" r="17" fill="#ffffff" opacity="0.42"/>
+
+  <!-- paper plane -->
+  <g transform="translate(96,96) scale(3.2)">
+    <path d="M10 55 L90 10 L60 90 L48 58 Z" fill="#f3f6ff"/>
+    <path d="M90 10 L48 58" stroke="#c9d6f5" stroke-width="2.4" stroke-linecap="round"/>
+  </g>
+</svg>

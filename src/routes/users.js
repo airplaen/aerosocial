@@ -2,8 +2,9 @@ const express = require("express");
 const fs = require("fs");
 const bcrypt = require("bcryptjs");
 const pool = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, optionalAuth } = require("../middleware/auth");
 const upload = require("../middleware/upload");
+const push = require("../lib/push");
 
 const router = express.Router();
 
@@ -109,30 +110,193 @@ router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
   }
 });
 
-router.get("/:callsign", async (req, res) => {
-  const cs = req.params.callsign.toUpperCase();
-  const userResult = await pool.query("SELECT * FROM users WHERE callsign = $1", [cs]);
-  const user = userResult.rows[0];
-  if (!user) return res.status(404).json({ error: "パイロットが見つかりません。" });
+// GET /api/users/search?q=...&limit=20
+// Finds users by callsign or display name (partial, case-insensitive).
+// Must come before /:callsign below, same reasoning as /me above — and
+// before /:callsign/follow etc. too, though those wouldn't actually
+// collide since Express matches on the full path shape.
+router.get("/search", optionalAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (!q) return res.json({ users: [] });
 
-  // flight is stored as a JSON string in SQLite, so use json_extract()
-  // instead of Postgres's ->> operator, with an explicit CAST.
-  const stats = await pool.query(
-    `SELECT COUNT(*) AS flight_count,
-            COALESCE(SUM(CAST(json_extract(flight, '$.durMin') AS INTEGER)), 0) AS total_min,
-            COALESCE(SUM(CAST(json_extract(flight, '$.distance') AS INTEGER)), 0) AS total_nm
-     FROM posts WHERE author_id = $1 AND type = 'flight'`,
-    [user.id]
-  );
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const like = `%${q}%`;
+    const params = [like, like];
+    let query = `SELECT * FROM users WHERE (callsign LIKE $1 OR name LIKE $2)`;
 
-  res.json({
-    user: publicUser(user),
-    stats: {
-      flights: Number(stats.rows[0].flight_count),
-      hours: Number(stats.rows[0].total_min) / 60,
-      distanceNm: Number(stats.rows[0].total_nm),
-    },
-  });
+    if (req.user?.id) {
+      params.push(req.user.id);
+      query += ` AND id != $${params.length}`;
+    }
+
+    // Its own placeholder rather than reusing $1 — see the follow-stats
+    // query below for why a positional placeholder can't be reused.
+    params.push(like);
+    query += ` ORDER BY (CASE WHEN callsign LIKE $${params.length} THEN 0 ELSE 1 END), callsign ASC`;
+    params.push(limit);
+    query += ` LIMIT $${params.length}`;
+
+    const result = await pool.query(query, params);
+    res.json({ users: result.rows.map(publicUser) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "ユーザー検索に失敗しました。" });
+  }
+});
+
+// POST /api/users/:callsign/follow  (toggle)
+// This path shape (an extra /follow segment) never collides with the bare
+// GET "/:callsign" below regardless of declaration order, since Express
+// matches on the full path shape, not just the leading segment.
+router.post("/:callsign/follow", requireAuth, async (req, res) => {
+  try {
+    const cs = req.params.callsign.toUpperCase();
+    const targetResult = await pool.query("SELECT id FROM users WHERE callsign = $1", [cs]);
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "パイロットが見つかりません。" });
+    if (target.id === req.user.id) {
+      return res.status(400).json({ error: "自分自身をフォローすることはできません。" });
+    }
+
+    const existing = await pool.query(
+      "SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2",
+      [req.user.id, target.id]
+    );
+
+    let following;
+    if (existing.rows.length) {
+      await pool.query(
+        "DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2",
+        [req.user.id, target.id]
+      );
+      following = false;
+    } else {
+      await pool.query(
+        "INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2)",
+        [req.user.id, target.id]
+      );
+      following = true;
+    }
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS c FROM follows WHERE followee_id = $1",
+      [target.id]
+    );
+
+    // Only on a new follow, never on unfollow. Unlike post notifications,
+    // this isn't gated by notify_pref — anyone with an active push
+    // subscription gets it.
+    if (following) {
+      push.pushToUsers([target.id], {
+        title: "新しいフォロワー",
+        body: `${req.user.callsign}さんにフォローされました`,
+        url: "/",
+        tag: `follow-${req.user.id}`,
+      }).catch((err) => console.error("follow notify failed:", err));
+    }
+
+    res.json({ following, followerCount: Number(countResult.rows[0].c) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "フォロー処理に失敗しました。" });
+  }
+});
+
+// GET /api/users/:callsign/followers  — users who follow :callsign
+router.get("/:callsign/followers", async (req, res) => {
+  try {
+    const cs = req.params.callsign.toUpperCase();
+    const targetResult = await pool.query("SELECT id FROM users WHERE callsign = $1", [cs]);
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "パイロットが見つかりません。" });
+
+    const result = await pool.query(
+      `SELECT u.* FROM follows f
+       JOIN users u ON u.id = f.follower_id
+       WHERE f.followee_id = $1
+       ORDER BY f.created_at DESC`,
+      [target.id]
+    );
+    res.json({ users: result.rows.map(publicUser) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "フォロワー一覧の取得に失敗しました。" });
+  }
+});
+
+// GET /api/users/:callsign/following  — users :callsign follows
+router.get("/:callsign/following", async (req, res) => {
+  try {
+    const cs = req.params.callsign.toUpperCase();
+    const targetResult = await pool.query("SELECT id FROM users WHERE callsign = $1", [cs]);
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "パイロットが見つかりません。" });
+
+    const result = await pool.query(
+      `SELECT u.* FROM follows f
+       JOIN users u ON u.id = f.followee_id
+       WHERE f.follower_id = $1
+       ORDER BY f.created_at DESC`,
+      [target.id]
+    );
+    res.json({ users: result.rows.map(publicUser) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "フォロー中一覧の取得に失敗しました。" });
+  }
+});
+
+// GET /api/users/:callsign  (optionalAuth: an anonymous viewer still gets
+// follower/following counts, just with isFollowedByMe always false)
+router.get("/:callsign", optionalAuth, async (req, res) => {
+  try {
+    const cs = req.params.callsign.toUpperCase();
+    const userResult = await pool.query("SELECT * FROM users WHERE callsign = $1", [cs]);
+    const user = userResult.rows[0];
+    if (!user) return res.status(404).json({ error: "パイロットが見つかりません。" });
+
+    // flight is stored as a JSON string in SQLite, so use json_extract()
+    // instead of Postgres's ->> operator, with an explicit CAST.
+    const stats = await pool.query(
+      `SELECT COUNT(*) AS flight_count,
+              COALESCE(SUM(CAST(json_extract(flight, '$.durMin') AS INTEGER)), 0) AS total_min,
+              COALESCE(SUM(CAST(json_extract(flight, '$.distance') AS INTEGER)), 0) AS total_nm
+       FROM posts WHERE author_id = $1 AND type = 'flight'`,
+      [user.id]
+    );
+
+    // Each subquery below gets its own sequential placeholder even though
+    // some reuse the same value (user.id) — db.js's $N -> ? conversion is
+    // purely positional/in-order, never keyed by the literal N, so a
+    // placeholder can't be safely reused across positions (see db.js).
+    const followStats = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM follows WHERE followee_id = $1) AS follower_count,
+         (SELECT COUNT(*) FROM follows WHERE follower_id = $2) AS following_count,
+         EXISTS (SELECT 1 FROM follows WHERE follower_id = $3 AND followee_id = $4) AS is_following`,
+      [user.id, user.id, req.user?.id || null, user.id]
+    );
+    const followRow = followStats.rows[0];
+
+    res.json({
+      user: publicUser(user),
+      stats: {
+        flights: Number(stats.rows[0].flight_count),
+        hours: Number(stats.rows[0].total_min) / 60,
+        distanceNm: Number(stats.rows[0].total_nm),
+      },
+      follow: {
+        followerCount: Number(followRow.follower_count),
+        followingCount: Number(followRow.following_count),
+        // SQLite's EXISTS(...) yields 0/1, not a real boolean
+        isFollowedByMe: !!followRow.is_following,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "プロフィールの取得に失敗しました。" });
+  }
 });
 
 module.exports = router;

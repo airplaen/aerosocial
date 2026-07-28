@@ -14,15 +14,27 @@ const storage = multer.diskStorage({
   },
 });
 
-const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+// "image/jpg" isn't a registered MIME type, but some cameras/OS upload
+// dialogs and older browsers report it instead of the correct
+// "image/jpeg" for .jpg files, so both are accepted here.
+const ALLOWED = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
+
+// Max number of images accepted on a single post (see posts.js, which uses
+// upload.array("images", MAX_FILES_PER_POST)).
+const MAX_FILES_PER_POST = 6;
 
 const upload = multer({
   storage,
-  limits: { fileSize: (Number(process.env.MAX_UPLOAD_MB) || 5) * 1024 * 1024 },
+  limits: {
+    fileSize: (Number(process.env.MAX_UPLOAD_MB) || 10) * 1024 * 1024,
+    files: MAX_FILES_PER_POST,
+  },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED.has(file.mimetype)) return cb(new Error("対応していない画像形式です。"));
     cb(null, true);
   },
 });
+
+upload.MAX_FILES_PER_POST = MAX_FILES_PER_POST;
 
 module.exports = upload;

@@ -5,10 +5,20 @@ const pool = require("../db");
 const { requireAuth, optionalAuth } = require("../middleware/auth");
 const upload = require("../middleware/upload");
 const { broadcast } = require("../ws");
+const push = require("../lib/push");
 
 const router = express.Router();
 
 function serializePost(row, viewerId) {
+  // `image_paths` is a "||"-joined list built by FEED_QUERY's post_images
+  // subquery, already ordered by position. Fall back to the legacy single
+  // `image_path` column for posts created before multi-image support
+  // existed and not yet backfilled by migrate.js.
+  const imagePaths = row.image_paths
+    ? row.image_paths.split("||").filter(Boolean)
+    : (row.image_path ? [row.image_path] : []);
+  const imageUrls = imagePaths.map((p) => `/uploads/${p}`);
+
   return {
     id: row.id,
     authorId: row.author_id,
@@ -20,7 +30,9 @@ function serializePost(row, viewerId) {
     text: row.text,
     // flight is stored as a JSON string in SQLite (no native JSONB type)
     flight: row.flight ? JSON.parse(row.flight) : null,
-    imageUrl: row.image_path ? `/uploads/${row.image_path}` : null,
+    imageUrls,
+    // Kept for older client code paths — always the first image.
+    imageUrl: imageUrls[0] || null,
     likeCount: Number(row.like_count),
     // SQLite's EXISTS(...) yields 0/1, not a real boolean
     likedByMe: viewerId ? !!row.liked_by_me : false,
@@ -37,13 +49,92 @@ const FEED_QUERY = `
     COALESCE(l.like_count, 0) AS like_count,
     COALESCE(c.comment_count, 0) AS comment_count,
     COALESCE(fc.flight_count, 0) AS author_flight_count,
-    EXISTS (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) AS liked_by_me
+    EXISTS (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) AS liked_by_me,
+    (SELECT GROUP_CONCAT(path, '||') FROM (
+      SELECT path FROM post_images WHERE post_id = p.id ORDER BY position ASC, created_at ASC
+    )) AS image_paths
   FROM posts p
   JOIN users u ON u.id = p.author_id
   LEFT JOIN (SELECT post_id, COUNT(*) AS like_count FROM likes GROUP BY post_id) l ON l.post_id = p.id
   LEFT JOIN (SELECT post_id, COUNT(*) AS comment_count FROM comments GROUP BY post_id) c ON c.post_id = p.id
   LEFT JOIN (SELECT author_id, COUNT(*) AS flight_count FROM posts WHERE type = 'flight' GROUP BY author_id) fc ON fc.author_id = p.author_id
 `;
+
+// Pushes a "new post" notification to every user eligible for it: anyone
+// with notify_pref = 'all', plus followers of the author with
+// notify_pref = 'following'. The author never notifies themselves. This is
+// fire-and-forget from the caller's perspective (errors are logged, never
+// thrown) so a push failure can never fail the post creation request.
+async function notifyNewPost(post, author) {
+  try {
+    const result = await pool.query(
+      `SELECT id FROM users
+       WHERE id != $1
+         AND (
+           notify_pref = 'all'
+           OR (notify_pref = 'following' AND id IN (
+             SELECT follower_id FROM follows WHERE followee_id = $2
+           ))
+         )`,
+      [author.id, author.id]
+    );
+    const userIds = result.rows.map((r) => r.id);
+    if (!userIds.length) return;
+
+    const body = post.text
+      ? post.text.slice(0, 100)
+      : (post.flight ? "フライトログを投稿しました" : "画像を投稿しました");
+
+    await push.pushToUsers(userIds, {
+      title: `${author.callsign}が投稿しました`,
+      body,
+      url: `/?post=${post.id}`,
+      tag: `post-${post.id}`,
+    });
+  } catch (err) {
+    console.error("notifyNewPost failed:", err);
+  }
+}
+
+// Shared post-creation logic. Used by:
+//  - POST /api/posts below (normal, JWT-authenticated client flow)
+//  - src/routes/fsaFlightPost.js (FSA自動投稿ブリッジ経由の投稿。
+//    scripts/fsa-to-aerosocial-bridge.js -> POST /api/internal/fsa-flight-post)
+// so both paths insert/broadcast/notify identically instead of drifting out
+// of sync with each other over time.
+//
+// `files` is the multer-style array (each with a `.filename`); pass an
+// empty array for callers that never attach images (e.g. the FSA bridge).
+async function createPost({ authorId, text, flight, files }) {
+  // SQLite has no gen_random_uuid(), so the id is generated here instead
+  // of relying on a column default.
+  const id = crypto.randomUUID();
+  await pool.query(
+    `INSERT INTO posts (id, author_id, type, text, flight)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      id,
+      authorId,
+      flight ? "flight" : "text",
+      text?.trim() || null,
+      flight ? JSON.stringify(flight) : null,
+    ]
+  );
+
+  const imageFiles = files || [];
+  for (let i = 0; i < imageFiles.length; i++) {
+    await pool.query(
+      `INSERT INTO post_images (id, post_id, path, position) VALUES ($1, $2, $3, $4)`,
+      [crypto.randomUUID(), id, imageFiles[i].filename, i]
+    );
+  }
+
+  const full = await pool.query(`${FEED_QUERY} WHERE p.id = $2`, [authorId, id]);
+  const post = serializePost(full.rows[0], authorId);
+  broadcast("post:new", post);
+  notifyNewPost(post, { id: authorId, callsign: post.authorCallsign });
+  return post;
+}
 
 // GET /api/posts?type=flight&author=CALLSIGN&before=<ISO date>&limit=20
 router.get("/", optionalAuth, async (req, res) => {
@@ -86,37 +177,70 @@ router.get("/popular-flights", optionalAuth, async (req, res) => {
   }
 });
 
-// POST /api/posts  (multipart/form-data: text, flight (JSON string), image (file, optional))
-router.post("/", requireAuth, upload.single("image"), async (req, res) => {
+// GET /api/posts/search?q=...&limit=30
+// Searches post text, and — since `flight` is stored as a JSON string —
+// a route/airport/aircraft substring inside a flight log too (e.g. "RJTT"
+// matches flight posts through Haneda even with no free-text caption).
+// Declared before the bare GET "/:id" route below so "search" isn't
+// swallowed as an :id, same reasoning as "/popular-flights" above.
+router.get("/search", optionalAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (!q) return res.json({ posts: [] });
+
+    const limit = Math.min(Number(req.query.limit) || 30, 50);
+    const like = `%${q}%`;
+    const params = [req.user?.id || null];
+    params.push(like);
+    const textCond = `p.text LIKE $${params.length}`;
+    params.push(like);
+    const flightCond = `p.flight LIKE $${params.length}`;
+    params.push(limit);
+
+    const query = `${FEED_QUERY} WHERE (${textCond} OR ${flightCond}) ORDER BY p.created_at DESC LIMIT $${params.length}`;
+    const result = await pool.query(query, params);
+    res.json({ posts: result.rows.map((r) => serializePost(r, req.user?.id)) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "検索に失敗しました。" });
+  }
+});
+
+// GET /api/posts/:id
+// Fetches a single post by id, regardless of whether it's within the most
+// recently loaded feed page. Used for permalinks / the "share post" feature,
+// since a shared link may point to a post older than the feed's normal
+// page window. Must be declared after "/popular-flights" (so that literal
+// path isn't swallowed here) but can otherwise sit anywhere relative to the
+// other /:id... routes, since Express matches by exact path shape.
+router.get("/:id", optionalAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`${FEED_QUERY} WHERE p.id = $2`, [req.user?.id || null, req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: "投稿が見つかりません。" });
+    res.json({ post: serializePost(result.rows[0], req.user?.id) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "投稿の取得に失敗しました。" });
+  }
+});
+
+// POST /api/posts
+// multipart/form-data: text, flight (JSON string), images (0-6 files,
+// field repeated once per file — e.g. FormData#append("images", file) in a
+// loop on the client)
+router.post("/", requireAuth, upload.array("images", upload.MAX_FILES_PER_POST), async (req, res) => {
   try {
     const { text } = req.body;
     let flight = null;
     if (req.body.flight) {
       try { flight = JSON.parse(req.body.flight); } catch { flight = null; }
     }
-    if (!text?.trim() && !flight && !req.file) {
+    const files = req.files || [];
+    if (!text?.trim() && !flight && !files.length) {
       return res.status(400).json({ error: "本文・フライトログ・画像のいずれかが必要です。" });
     }
 
-    // SQLite has no gen_random_uuid(), so the id is generated here instead
-    // of relying on a column default.
-    const id = crypto.randomUUID();
-    const result = await pool.query(
-      `INSERT INTO posts (id, author_id, type, text, flight, image_path)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [
-        id,
-        req.user.id,
-        flight ? "flight" : "text",
-        text?.trim() || null,
-        flight ? JSON.stringify(flight) : null,
-        req.file?.filename || null,
-      ]
-    );
-
-    const full = await pool.query(`${FEED_QUERY} WHERE p.id = $2`, [req.user.id, result.rows[0].id]);
-    const post = serializePost(full.rows[0], req.user.id);
-    broadcast("post:new", post);
+    const post = await createPost({ authorId: req.user.id, text, flight, files });
     res.status(201).json({ post });
   } catch (err) {
     console.error(err);
@@ -153,7 +277,8 @@ router.post("/:id/like", requireAuth, async (req, res) => {
 // GET /api/posts/:id/comments
 router.get("/:id/comments", async (req, res) => {
   const result = await pool.query(
-    `SELECT c.id, c.text, c.created_at, u.callsign AS author_callsign, u.name AS author_name, u.id AS author_id
+    `SELECT c.id, c.text, c.created_at AS "createdAt",
+            u.callsign AS "authorCallsign", u.name AS "authorName", u.id AS "authorId"
      FROM comments c JOIN users u ON u.id = c.author_id
      WHERE c.post_id = $1 ORDER BY c.created_at ASC`,
     [req.params.id]
@@ -198,11 +323,15 @@ router.delete("/:id", requireAuth, async (req, res) => {
     if (!post) return res.status(404).json({ error: "投稿が見つかりません。" });
     if (post.author_id !== req.user.id) return res.status(403).json({ error: "この投稿を削除する権限がありません。" });
 
+    const imagesResult = await pool.query("SELECT path FROM post_images WHERE post_id = $1", [req.params.id]);
+    const imagePaths = imagesResult.rows.map((r) => r.path);
+    // Legacy column, for posts that predate multi-image support and
+    // haven't been backfilled into post_images yet.
+    if (post.image_path && !imagePaths.includes(post.image_path)) imagePaths.push(post.image_path);
+
     await pool.query("DELETE FROM posts WHERE id = $1", [req.params.id]);
-    if (post.image_path) {
-      const filePath = `${process.env.UPLOAD_DIR || "./uploads"}/${post.image_path}`;
-      fs.unlink(filePath, () => {});
-    }
+    const uploadDir = process.env.UPLOAD_DIR || "./uploads";
+    imagePaths.forEach((p) => fs.unlink(`${uploadDir}/${p}`, () => {}));
     broadcast("post:deleted", { id: req.params.id });
     res.status(204).end();
   } catch (err) {
@@ -212,3 +341,9 @@ router.delete("/:id", requireAuth, async (req, res) => {
 });
 
 module.exports = router;
+// Exposed as a property on the router (still a plain function, so
+// `app.use("/api/posts", require("./routes/posts"))` in index.js keeps
+// working unchanged) so other route files — currently just
+// fsaFlightPost.js — can create a post the exact same way this file does,
+// without duplicating the insert/broadcast/notify logic.
+router.createPost = createPost;
