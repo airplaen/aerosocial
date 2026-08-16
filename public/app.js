@@ -28,8 +28,18 @@
     // A flight card fetched from SimBrief, waiting to be attached to the
     // next post the user submits from the composer.
     pendingFlight: null,
+    // Poll builder state (投票機能), while composing a new post — null
+    // means "no poll being built" (same on/off pattern as pendingFlight).
+    // `options` always has at least POLL_MIN_OPTIONS entries; the UI adds
+    // blank ones up to POLL_MAX_OPTIONS.
+    pendingPoll: null,
     // Top liked flight-type posts, shown in the "人気のフライト" panel.
     popularFlights: [],
+    // 日本語ニュース(APITube News API 経由、サーバー側でポーリング)。
+    // 人気のフライトパネルの下部に表示する。新着はWebSocket
+    // (news:new — handleWsMessageのケース参照)でリアルタイムに先頭へ
+    // 追加される。
+    news: [],
     // Feed pagination: whether an older page might still exist, and
     // whether a "load more" request is currently in flight (guards against
     // double-fetch from a fast double click).
@@ -71,6 +81,24 @@
     // Most recent 緊急地震速報（警報）(code 556 — a forecast issued before
     // shaking arrives) received, real or sandbox-sourced.
     latestEEW: null,
+    // ---- OpenWeatherMap 天気検索 (地震情報パネル下部の検索窓) ----
+    // 検索欄に入力中/確定したテキスト。パネルはquake系イベントのたびに
+    // 再描画されるため、値をstateに保持して再描画後も入力内容が失われな
+    // いようにする。
+    weather: {
+      query: "",
+      loading: false,
+      error: "",
+      // ジオコーディングで複数地域がヒットした場合の選択肢(同名地域が
+      // 複数国にまたがるケースがあるため)。1件だけヒットした場合は
+      // 自動的に選択される。
+      candidates: null,
+      // 選択中の地域 { displayName, country, state, lat, lon }
+      location: null,
+      // /api/weather/summary のレスポンス(今日/明日のサマリーと
+      // 詳細モーダル用の3時間ごとの予報を含む)
+      data: null,
+    },
     // Admin-configured ad embed (AdSense/AdMax/etc. snippet), loaded from
     // GET /api/ads on boot. `code` is only ever non-empty when `enabled`
     // is true (see routes/ads.js) and `frequency` is "insert after every
@@ -89,12 +117,31 @@
   // Max number of images allowed on a single post (kept in sync with the
   // server-side limit in middleware/upload.js).
   const MAX_COMPOSER_IMAGES = 6;
+  // Kept in sync with POLL_MIN_OPTIONS/POLL_MAX_OPTIONS/POLL_MAX_OPTION_LEN
+  // in src/routes/posts.js — the server re-validates these regardless, but
+  // matching limits here means the composer never lets you build something
+  // the server would then reject.
+  const POLL_MIN_OPTIONS = 2;
+  const POLL_MAX_OPTIONS = 6;
+  const POLL_MAX_OPTION_LEN = 60;
 
   // ---------------------------------------------------------------- utils
   function escapeHtml(str) {
     return String(str ?? "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
+  }
+
+  // 文字列(ニュースの出典名など)から安定した色相(0-359)を作る軽量ハッシュ。
+  // 画像の無いニュースカードのフォールバックアイコンに、出典ごとに違う
+  // 色味を与えて単調にならないようにするためだけに使う。
+  function hueFromString(str) {
+    const s = String(str || "");
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+      hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return hash % 360;
   }
 
   // Turns URLs inside already-escaped HTML text into clickable links.
@@ -214,6 +261,24 @@
     return d.toLocaleDateString("ja-JP", { month: "short", day: "numeric" });
   }
 
+  // Full date+time for event start/end times (unlike fmtTime above, this
+  // is always the absolute date — a relative "3日前" reading doesn't make
+  // sense for a future event's start time).
+  function fmtEventDateTime(iso) {
+    if (!iso) return "";
+    return new Date(iso).toLocaleString("ja-JP", {
+      year: "numeric", month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
+    });
+  }
+
+  // <input type="datetime-local"> wants "YYYY-MM-DDTHH:mm" in *local* time
+  // (no timezone/offset) — toISOString() is UTC, so build it from the
+  // Date object's local getters instead.
+  function toDateTimeLocalValue(date) {
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
   function avatarHtml(user, size) {
     const style = size ? `width:${size}px;height:${size}px;` : "";
     if (user.avatarUrl) {
@@ -330,10 +395,49 @@
   }
 
   let vapidPublicKey = null;
+  // Guards watchForServiceWorkerUpdates() below so its listeners are only
+  // ever wired up once, even though getServiceWorkerRegistration() itself
+  // is called from several places (push setup, boot, ...).
+  let swUpdateWatchStarted = false;
 
   async function getServiceWorkerRegistration() {
     if (!("serviceWorker" in navigator)) return null;
-    return navigator.serviceWorker.register("/sw.js");
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    watchForServiceWorkerUpdates(reg);
+    return reg;
+  }
+
+  // Makes a server-side deploy actually reach people without them needing
+  // to force-reload — which mobile browsers don't offer an easy gesture
+  // for anyway. sw.js's fetch handler is network-first now, so a plain
+  // reload already picks up new app.js/styles.css; this handles the part
+  // that still needs it: getting that reload to happen automatically.
+  //
+  //   1) Ask the browser to re-check /sw.js for changes whenever the tab
+  //      becomes visible, instead of waiting on its own update schedule
+  //      (which can be up to ~24h on some browsers).
+  //   2) sw.js calls self.skipWaiting() + self.clients.claim(), so once a
+  //      newly-fetched sw.js is byte-different from the running one, it
+  //      installs and activates immediately rather than waiting for every
+  //      tab to close first. That activation fires "controllerchange" in
+  //      every currently-open tab — reload once when that happens so this
+  //      tab's already-loaded (and now stale) app.js/styles.css actually
+  //      gets replaced, instead of the old JS just continuing to run.
+  function watchForServiceWorkerUpdates(reg) {
+    if (!reg || swUpdateWatchStarted) return;
+    swUpdateWatchStarted = true;
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
+    });
+
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading) return;
+      reloading = true;
+      toast("新しいバージョンに更新します…");
+      setTimeout(() => window.location.reload(), 600);
+    });
   }
 
   async function getCurrentPushSubscription() {
@@ -595,6 +699,9 @@
     connectWS();
     connectQuakeWS();
     startQuakePolling();
+    // quakeパネルと同じく未ログインでも見せるので、ログイン分岐の外側で
+    // 呼ぶ。以降の新着はWS(news:new)でリアルタイムに追加される。
+    loadNews();
   }
 
   // If the page was opened via a shared post link (?post=<id>), open that
@@ -713,6 +820,21 @@
     }
   }
 
+  // ニュースパネルの初期ロード。未ログインの訪問者にも見せる(quakeパネル
+  // と同方針)ので、ログイン状態に関わらずboot()から呼ぶ。以降の新着は
+  // WebSocketのnews:newで追加される(handleWsMessage参照) — ここでの
+  // 再フェッチはページ読み込み時と、WS再接続直後に取りこぼしを埋める
+  // 目的の2回だけで十分。
+  async function loadNews() {
+    try {
+      const { items } = await api("/api/news?limit=30");
+      state.news = items;
+      renderNewsPanel();
+    } catch {
+      // Non-critical panel — fail silently, same reasoning as popular flights.
+    }
+  }
+
   async function login(callsign, password) {
     const data = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ callsign, password }) });
     setToken(data.token);
@@ -821,11 +943,12 @@
     render();
   }
 
-  async function createPost(text, files, flight) {
+  async function createPost(text, files, flight, poll) {
     const form = new FormData();
     if (text) form.append("text", text);
     (files || []).forEach((file) => form.append("images", file));
     if (flight) form.append("flight", JSON.stringify(flight));
+    if (poll) form.append("poll", JSON.stringify(poll));
     const { post } = await api("/api/posts", { method: "POST", body: form });
     state.posts = [post, ...state.posts.filter((p) => p.id !== post.id)];
     renderFeedList();
@@ -857,6 +980,37 @@
     } catch (err) {
       post.likedByMe = prevLiked;
       post.likeCount = prevCount;
+      renderFeedList();
+      toast(err.message);
+    }
+  }
+
+  async function voteOnPoll(postId, optionId) {
+    const post = state.posts.find((p) => p.id === postId);
+    if (!post || !post.poll) return;
+    // optimistic update — mirrors toggleLike()'s pattern above
+    const prevPoll = JSON.parse(JSON.stringify(post.poll));
+    const wasMine = post.poll.myVoteOptionId === optionId;
+    post.poll.options.forEach((opt) => {
+      if (opt.id === prevPoll.myVoteOptionId) opt.voteCount -= 1;
+      if (opt.id === optionId && !wasMine) opt.voteCount += 1;
+    });
+    post.poll.myVoteOptionId = wasMine ? null : optionId;
+    post.poll.totalVotes = prevPoll.totalVotes + (wasMine ? -1 : (prevPoll.myVoteOptionId ? 0 : 1));
+    renderFeedList();
+    try {
+      const { poll } = await api(`/api/posts/${postId}/vote`, {
+        method: "POST",
+        body: JSON.stringify({ optionId }),
+      });
+      // Server response omits myVoteOptionId is never true here — this is
+      // the direct REST response to *this* request, not a WS broadcast
+      // (see handleWsMessage's "poll:vote" case below for why that one
+      // deliberately doesn't carry myVoteOptionId).
+      post.poll = poll;
+      renderFeedList();
+    } catch (err) {
+      post.poll = prevPoll;
       renderFeedList();
       toast(err.message);
     }
@@ -898,11 +1052,12 @@
     renderFeedList();
   }
 
-  async function updateProfile({ name, bio, homeBase, avatarFile }) {
+  async function updateProfile({ name, bio, homeBase, favoriteAnimeList, avatarFile }) {
     const form = new FormData();
     if (name !== undefined) form.append("name", name);
     if (bio !== undefined) form.append("bio", bio);
     if (homeBase !== undefined) form.append("homeBase", homeBase);
+    if (favoriteAnimeList !== undefined) form.append("favoriteAnimeList", JSON.stringify(favoriteAnimeList));
     if (avatarFile) form.append("avatar", avatarFile);
     const { user } = await api("/api/users/me", { method: "PATCH", body: form });
     state.user = user;
@@ -916,7 +1071,13 @@
 
   // ---------------------------------------------------------------- WebSocket
   function connectWS() {
-    if (!state.user) return;
+    // Previously returned early when logged out, since nothing consumed
+    // the broadcasts yet for an anonymous visitor (state.posts stays empty
+    // until loadFeed(), which only runs when logged in). Now that the news
+    // panel (news:new — see handleWsMessage) is shown to every visitor
+    // regardless of login, this connects unconditionally so logged-out
+    // users get live news too; the backend already accepted anonymous
+    // connections for this reason (see ws.js's comment on initWebSocket).
     // Guard against ending up with two live sockets (e.g. connectWS() being
     // reachable from more than one auth flow in the same session) — an
     // orphaned old socket would still fire onmessage for every broadcast,
@@ -940,7 +1101,9 @@
     ws.onclose = () => {
       state.wsConnected = false;
       updateWsIndicator();
-      if (state.user) wsRetryTimer = setTimeout(connectWS, 3000);
+      // Always retry now (see the connectWS() comment above) — previously
+      // gated on state.user since a logged-out socket had nothing to do.
+      wsRetryTimer = setTimeout(connectWS, 3000);
     };
 
     ws.onerror = () => ws.close();
@@ -984,6 +1147,20 @@
         }
         break;
       }
+      case "poll:vote": {
+        // Broadcast payload deliberately omits myVoteOptionId (it's
+        // per-viewer, not a shared fact — see routes/posts.js's /vote
+        // handler), so only counts/totalVotes are applied here; the
+        // voter's own myVoteOptionId is set directly by voteOnPoll()'s
+        // REST response instead, and this WS echo must not stomp on it.
+        const post = state.posts.find((p) => p.id === msg.payload.postId);
+        if (post && post.poll) {
+          const myVoteOptionId = post.poll.myVoteOptionId;
+          post.poll = { ...msg.payload.poll, myVoteOptionId };
+          renderFeedList();
+        }
+        break;
+      }
       case "comment:new": {
         const post = state.posts.find((p) => p.id === msg.payload.postId);
         if (post) {
@@ -1004,6 +1181,18 @@
         }
         break;
       }
+      case "news:new": {
+        // src/services/newsFeed.js broadcasts one message per new article,
+        // oldest-first, as soon as it's detected — see that file for why
+        // this is a server-side poll-then-broadcast instead of the
+        // browser talking to APITube directly.
+        if (!state.news.some((n) => n.id === msg.payload.id)) {
+          state.news = [msg.payload, ...state.news].slice(0, 60);
+          renderNewsPanel();
+          if (msg.payload.isBreaking) showNewsFlashPopup(msg.payload);
+        }
+        break;
+      }
       default: break;
     }
   }
@@ -1019,6 +1208,12 @@
   let quakeWs = null;
   let quakeWsRetryTimer = null;
   let quakeMapInstance = null;
+  // Debounce timer for the weather search box mounted at the bottom of the
+  // quake panel (see wireWeatherSection) — same 500ms-ish convention as
+  // feedSearchTimer, just declared at module scope since the panel (and
+  // therefore the input element) gets torn down and recreated on every
+  // renderQuakePanel() call.
+  let weatherSearchTimer = null;
 
   // P2PQuake encodes JMA震度 as the real value × 10, with the "弱/強" splits
   // of 5 and 6 getting their own in-between codes (45/50/55/60) instead of
@@ -1230,17 +1425,16 @@
     if (eewPopupTimer) { clearTimeout(eewPopupTimer); eewPopupTimer = null; }
   }
 
-  // Timestamp of the last time the production socket demonstrably did
-  // something (opened or delivered a message). Mobile browsers commonly
-  // let a backgrounded tab's WebSocket die without ever firing onclose —
-  // state.quakeWsConnected then stays stuck "true" while nothing further
-  // arrives, silently, for as long as the tab is backgrounded. Since a
-  // missed EEW is a safety issue and not just a stale indicator dot, this
-  // is checked by the watchdog below and forces a reconnect once it's
-  // been quiet for too long while the tab is actually in the foreground.
-  let quakeWsLastActivityAt = Date.now();
+  // Reconnect delay after the socket closes, doubling on each consecutive
+  // failure (reset to base as soon as a connection actually opens) —
+  // see the onclose handler in connectQuakeWS below for why a fixed
+  // short delay was itself part of a previous bug.
+  const QUAKE_WS_RETRY_BASE_MS = 5000;
+  const QUAKE_WS_RETRY_MAX_MS = 5 * 60 * 1000;
+  let quakeWsRetryDelay = QUAKE_WS_RETRY_BASE_MS;
 
   function connectQuakeWS() {
+    if (quakeWsRetryTimer) { clearTimeout(quakeWsRetryTimer); quakeWsRetryTimer = null; }
     if (quakeWs) {
       quakeWs.onopen = quakeWs.onclose = quakeWs.onerror = quakeWs.onmessage = null;
       quakeWs.close();
@@ -1253,18 +1447,23 @@
 
     quakeWs.onopen = () => {
       state.quakeWsConnected = true;
-      quakeWsLastActivityAt = Date.now();
       renderQuakePanel();
-      if (quakeWsRetryTimer) { clearTimeout(quakeWsRetryTimer); quakeWsRetryTimer = null; }
+      quakeWsRetryDelay = QUAKE_WS_RETRY_BASE_MS; // connection succeeded — reset backoff
     };
     quakeWs.onclose = () => {
       state.quakeWsConnected = false;
       renderQuakePanel();
-      quakeWsRetryTimer = setTimeout(connectQuakeWS, 5000);
+      // Exponential backoff (capped) instead of a fixed 5s retry: a fixed
+      // short delay is exactly what turned a previous, unrelated bug (see
+      // the watchdog comment below) into a reconnect-storm that got this
+      // client's IP rate-limited by P2PQuake (WS handshake failing with
+      // HTTP 429). Backing off further on repeated failures is standard
+      // practice against exactly that failure mode, whatever causes it.
+      quakeWsRetryTimer = setTimeout(connectQuakeWS, quakeWsRetryDelay);
+      quakeWsRetryDelay = Math.min(quakeWsRetryDelay * 2, QUAKE_WS_RETRY_MAX_MS);
     };
     quakeWs.onerror = () => quakeWs.close();
     quakeWs.onmessage = (evt) => {
-      quakeWsLastActivityAt = Date.now();
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
       handleQuakeMessage(msg, false);
@@ -1281,32 +1480,53 @@
   // through a brief reconnect window.
   //
   // 1) Force a fresh connection whenever the tab becomes visible again or
-  //    the network comes back, instead of trusting whatever state the
-  //    old socket claims to be in.
+  //    the network comes back — but only if there genuinely isn't a live
+  //    connection already (OPEN or actively CONNECTING) AND there isn't
+  //    already a backoff retry scheduled. Calling connectQuakeWS()
+  //    directly here would cancel that pending retry and attempt
+  //    immediately instead — exactly what kept re-triggering the 429s
+  //    below no matter how far the backoff had grown.
+  function reconnectQuakeWSIfNeeded() {
+    if (quakeWs && (quakeWs.readyState === WebSocket.OPEN || quakeWs.readyState === WebSocket.CONNECTING)) return;
+    if (quakeWsRetryTimer) return; // a backoff retry is already scheduled — let it run its course
+    connectQuakeWS();
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      connectQuakeWS();
+      reconnectQuakeWSIfNeeded();
       pollQuakeHistory();
     }
   });
   window.addEventListener("online", () => {
-    connectQuakeWS();
+    reconnectQuakeWSIfNeeded();
     pollQuakeHistory();
   });
 
   // 2) While the tab is visible, periodically confirm the socket is
   //    actually still open (not just "not yet told us it closed") and
-  //    force-reconnect if it's gone quiet for too long — a dead socket
-  //    that never fired onclose would otherwise sit unnoticed.
+  //    reconnect if it's genuinely gone — but ONLY based on readyState,
+  //    never on "it's been quiet for a while". P2PQuake's feed can
+  //    legitimately go quiet for long stretches (most of the time,
+  //    nothing happens — that's the point), so an earlier version of
+  //    this watchdog treated that normal silence as a dead connection
+  //    and force-reconnected roughly every 45–65s, forever, for as long
+  //    as the tab was open. That reconnect storm is what got this
+  //    client's IP rate-limited (WS handshake failing with HTTP 429).
+  //
+  //    Just as important: this must NOT fire while a backoff retry is
+  //    already scheduled (quakeWsRetryTimer set). Every close (including
+  //    a failed 429 handshake) leaves the socket in CLOSED right up
+  //    until that scheduled retry runs — so without this check, the
+  //    watchdog was calling connectQuakeWS() itself every 20s regardless,
+  //    which cancels the pending backoff timer and attempts immediately,
+  //    silently overriding the whole backoff and re-triggering the 429
+  //    in a tight ~20s loop no matter how far quakeWsRetryDelay had grown.
   const QUAKE_WATCHDOG_INTERVAL_MS = 20000;
-  const QUAKE_WATCHDOG_STALE_MS = 45000;
   setInterval(() => {
     if (document.visibilityState !== "visible") return;
+    if (quakeWsRetryTimer) return; // already backing off — don't preempt it
     const socketBroken = !quakeWs || quakeWs.readyState === WebSocket.CLOSED || quakeWs.readyState === WebSocket.CLOSING;
-    const wentQuiet = Date.now() - quakeWsLastActivityAt > QUAKE_WATCHDOG_STALE_MS;
-    if (socketBroken || (state.quakeWsConnected && wentQuiet)) {
-      connectQuakeWS();
-    }
+    if (socketBroken) connectQuakeWS();
   }, QUAKE_WATCHDOG_INTERVAL_MS);
 
   // 3) Independent of the WebSocket entirely: poll P2PQuake's plain HTTPS
@@ -1387,9 +1607,21 @@
   // report. Independent of connectQuakeWS()'s always-on production socket.
   const QUAKE_SANDBOX_WS_URL = "wss://api-realtime-sandbox.p2pquake.net/v2/ws";
   let quakeSandboxWs = null;
+  // After a failed attempt (e.g. P2PQuake rate-limiting this IP — see the
+  // production-socket comments above), briefly disable the test button
+  // instead of leaving it instantly clickable again. Nothing here
+  // auto-retries on its own, but without this a person naturally clicks
+  // "テスト表示" again right away when it doesn't seem to work, which just
+  // piles more attempts onto the very thing that's already being rejected.
+  const QUAKE_SANDBOX_RETRY_COOLDOWN_MS = 15000;
+  let quakeSandboxCooldownUntil = 0;
 
   function connectQuakeSandboxWS() {
     if (quakeSandboxWs) return; // already connecting or connected
+    if (Date.now() < quakeSandboxCooldownUntil) {
+      toast("接続に失敗しました。しばらく待ってから再度お試しください。");
+      return;
+    }
     state.quakeTestConnecting = true;
     renderQuakePanel();
     try {
@@ -1397,6 +1629,7 @@
     } catch {
       quakeSandboxWs = null;
       state.quakeTestConnecting = false;
+      quakeSandboxCooldownUntil = Date.now() + QUAKE_SANDBOX_RETRY_COOLDOWN_MS;
       renderQuakePanel();
       toast("サンドボックスへの接続に失敗しました");
       return;
@@ -1408,12 +1641,18 @@
       toast("地震情報サンドボックスに接続しました。テストデータの配信をお待ちください…");
     };
     quakeSandboxWs.onclose = () => {
-      const wasActive = state.quakeTestMode || state.quakeTestConnecting;
+      const wasActive = state.quakeTestMode;
+      const failedToConnect = state.quakeTestConnecting; // reached onclose without ever hitting onopen
       quakeSandboxWs = null;
       state.quakeTestMode = false;
       state.quakeTestConnecting = false;
       renderQuakePanel();
-      if (wasActive) toast("地震情報サンドボックスから切断しました");
+      if (failedToConnect) {
+        quakeSandboxCooldownUntil = Date.now() + QUAKE_SANDBOX_RETRY_COOLDOWN_MS;
+        toast("接続に失敗しました。しばらく待ってから再度お試しください。");
+      } else if (wasActive) {
+        toast("地震情報サンドボックスから切断しました");
+      }
     };
     quakeSandboxWs.onerror = () => { if (quakeSandboxWs) quakeSandboxWs.close(); };
     quakeSandboxWs.onmessage = (evt) => {
@@ -1513,7 +1752,33 @@
     `;
   }
 
+  // renderQuakePanel() used to always target a single element — either the
+  // one explicitly passed in, or #quake-slot by default. That default is
+  // the desktop sidebar, which is display:none on mobile (<900px — see
+  // .mobile-tabbar in styles.css); the mobile bottom sheet renders this
+  // same panel into a *different* element (#mobile-panel-content, opened
+  // via openMobilePanel("quake")). Every call site that reacts to live
+  // data — handleQuakeMessage's WS/poll messages, connectQuakeWS's own
+  // connection-status updates, the sandbox test connection — only ever
+  // called the plain default form, so on mobile those updates landed on
+  // the hidden desktop copy while the visible bottom sheet sat stale until
+  // it was closed and reopened (which re-renders fresh from current
+  // state). Rather than needing every such call site to know to use a
+  // special "everywhere" variant, the default (no-arg) call itself now
+  // renders into every currently-mounted copy.
   function renderQuakePanel(targetEl) {
+    if (targetEl) {
+      renderQuakePanelInto(targetEl);
+      return;
+    }
+    renderQuakePanelInto();
+    if (mobilePanelKind === "quake") {
+      const content = document.getElementById("mobile-panel-content");
+      if (content) renderQuakePanelInto(content);
+    }
+  }
+
+  function renderQuakePanelInto(targetEl) {
     const slot = targetEl || document.getElementById("quake-slot");
     if (!slot) return; // not mounted yet (e.g. still on the auth screen)
 
@@ -1533,11 +1798,265 @@
         ${eew ? renderEewAlertHtml(eew) : ""}
         ${q ? renderQuakeCardHtml(q) : `<div class="quake-empty">受信した地震情報はまだありません</div>`}
         <button type="button" class="btn btn-ghost quake-test-btn" id="quake-test-btn" ${state.quakeTestConnecting ? "disabled" : ""}>${testBtnLabel}</button>
+        ${renderWeatherSectionHtml()}
       </div>
     `;
 
     slot.querySelector("#quake-test-btn").addEventListener("click", toggleQuakeSandbox);
     if (q) initQuakeMap(q.hypocenter, slot);
+    wireWeatherSection(slot);
+  }
+
+  // ---------------------------------------------------------------- 天気予報 (OpenWeatherMap)
+  // 地震情報パネルの下部に地域検索窓を設置し、検索した地域の今日/明日の
+  // 天気サマリーを表示する。「詳細を見る」から現在の気温・体感温度・湿度
+  // ・風速・日の出日の入りと、3時間ごとの詳細予報を見られるモーダルを開く。
+  // OpenWeatherMapのAPIキーはサーバー側(routes/weather.js)にのみ置かれ、
+  // フロントは自前サーバー経由(/api/weather/...)でのみ叩く。
+  function weatherIconUrl(icon) {
+    return icon ? `https://openweathermap.org/img/wn/${icon}@2x.png` : "";
+  }
+
+  function weatherDayCardHtml(label, day) {
+    if (!day) {
+      return `
+        <div class="weather-day-card weather-day-empty">
+          <div class="weather-day-label">${label}</div>
+          <div class="weather-day-desc">データなし</div>
+        </div>
+      `;
+    }
+    return `
+      <div class="weather-day-card">
+        <div class="weather-day-label">${label}</div>
+        ${day.icon ? `<img class="weather-day-icon" src="${weatherIconUrl(day.icon)}" alt="${escapeHtml(day.weather)}" loading="lazy" />` : ""}
+        <div class="weather-day-temp"><b>${day.tempMax}°</b><span class="weather-day-temp-min">/ ${day.tempMin}°</span></div>
+        <div class="weather-day-desc">${escapeHtml(day.weather)}</div>
+        ${day.pop != null ? `<div class="weather-day-pop">☔ ${day.pop}%</div>` : ""}
+      </div>
+    `;
+  }
+
+  function renderWeatherSectionHtml() {
+    const w = state.weather;
+    return `
+      <div class="weather-section">
+        <div class="weather-section-title">🌤️ 天気予報</div>
+        <div class="weather-search" id="weather-search">
+          <span class="material-symbols-rounded feed-search-icon" aria-hidden="true">search</span>
+          <input type="text" id="weather-search-input" placeholder="地域名で検索（例: 名古屋）" autocomplete="off" value="${escapeHtml(w.query)}" />
+          <button type="button" class="feed-search-clear${w.query ? "" : " hidden"}" id="weather-search-clear" title="検索をクリア">✕</button>
+        </div>
+        ${w.loading ? `<div class="spinner-row">読み込み中...</div>` : ""}
+        ${w.error ? `<div class="error-banner weather-error">${escapeHtml(w.error)}</div>` : ""}
+        ${w.candidates && w.candidates.length ? `
+          <div class="weather-candidates">
+            ${w.candidates.map((c, i) => `
+              <button type="button" class="weather-candidate-chip" data-index="${i}">
+                ${escapeHtml(c.displayName)}${c.state ? `（${escapeHtml(c.state)}）` : ""}${c.country ? ` ${escapeHtml(c.country)}` : ""}
+              </button>
+            `).join("")}
+          </div>
+        ` : ""}
+        ${w.data && w.location ? `
+          <div class="weather-result">
+            <div class="weather-result-location">📍 ${escapeHtml(w.location.displayName)}${w.location.country ? `（${escapeHtml(w.location.country)}）` : ""}</div>
+            <div class="weather-day-grid">
+              ${weatherDayCardHtml("今日", w.data.today)}
+              ${weatherDayCardHtml("明日", w.data.tomorrow)}
+            </div>
+            <button type="button" class="btn btn-ghost btn-block weather-detail-btn" id="weather-detail-btn">詳細を見る</button>
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }
+
+  // renderQuakePanel()が呼ばれるたびにDOMごと再生成されるため、検索欄の
+  // input/keydownリスナーと候補チップ、詳細ボタンのクリックをそのたびに
+  // 配線し直す。feed-search-input(フィード検索)と同じ、350msデバウンス
+  // + Enterキーで即時実行という規約に合わせている。
+  function wireWeatherSection(slot) {
+    const input = slot.querySelector("#weather-search-input");
+    const clearBtn = slot.querySelector("#weather-search-clear");
+    if (input) {
+      input.addEventListener("input", (e) => {
+        const value = e.target.value;
+        if (clearBtn) clearBtn.classList.toggle("hidden", !value);
+        clearTimeout(weatherSearchTimer);
+        weatherSearchTimer = setTimeout(() => searchWeatherLocations(value), 500);
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        clearTimeout(weatherSearchTimer);
+        searchWeatherLocations(input.value);
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        clearTimeout(weatherSearchTimer);
+        clearWeatherSearch();
+      });
+    }
+    slot.querySelectorAll(".weather-candidate-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const loc = state.weather.candidates[Number(btn.dataset.index)];
+        if (loc) selectWeatherLocation(loc);
+      });
+    });
+    const detailBtn = slot.querySelector("#weather-detail-btn");
+    if (detailBtn) detailBtn.addEventListener("click", openWeatherDetail);
+  }
+
+  // 地域名から候補地(緯度経度)を検索する。1件だけヒットした場合は
+  // ユーザーに選ばせず自動的にその地域の天気を取得する。
+  async function searchWeatherLocations(query) {
+    const trimmed = query.trim();
+    state.weather.query = trimmed;
+    state.weather.candidates = null;
+    state.weather.data = null;
+    state.weather.location = null;
+    state.weather.error = "";
+    if (!trimmed) {
+      renderQuakePanelEverywhere();
+      return;
+    }
+
+    state.weather.loading = true;
+    renderQuakePanelEverywhere();
+    try {
+      const res = await fetch(`/api/weather/search?q=${encodeURIComponent(trimmed)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "地域の検索に失敗しました。");
+      if (!data.results || !data.results.length) {
+        state.weather.error = "該当する地域が見つかりませんでした。";
+        state.weather.loading = false;
+        renderQuakePanelEverywhere();
+        return;
+      }
+      if (data.results.length === 1) {
+        state.weather.loading = false;
+        await selectWeatherLocation(data.results[0]);
+        return;
+      }
+      state.weather.candidates = data.results;
+    } catch (err) {
+      state.weather.error = err.message;
+    } finally {
+      state.weather.loading = false;
+      renderQuakePanelEverywhere();
+    }
+  }
+
+  // 選択された地域の今日/明日の天気サマリーと詳細データを取得する。
+  async function selectWeatherLocation(loc) {
+    state.weather.location = loc;
+    state.weather.candidates = null;
+    state.weather.data = null;
+    state.weather.error = "";
+    state.weather.loading = true;
+    renderQuakePanelEverywhere();
+    try {
+      const res = await fetch(`/api/weather/summary?lat=${encodeURIComponent(loc.lat)}&lon=${encodeURIComponent(loc.lon)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "天気情報の取得に失敗しました。");
+      state.weather.data = data;
+    } catch (err) {
+      state.weather.error = err.message;
+    } finally {
+      state.weather.loading = false;
+      renderQuakePanelEverywhere();
+    }
+  }
+
+  function clearWeatherSearch() {
+    state.weather = { query: "", loading: false, error: "", candidates: null, location: null, data: null };
+    renderQuakePanelEverywhere();
+  }
+
+  function weatherHourlyRowHtml(h) {
+    // dtTextはサーバーが検索対象地域のタイムゾーンで組み立てた
+    // "YYYY-MM-DD HH:MM:SS" 文字列なので、そのまま月/日 時:分として使う
+    // （ブラウザ側のローカルタイムゾーンには変換しない）。
+    const label = h.dtText ? `${h.dtText.slice(5, 10).replace("-", "/")} ${h.dtText.slice(11, 16)}` : "";
+    return `
+      <div class="weather-hour-row">
+        <div class="weather-hour-time">${escapeHtml(label)}</div>
+        ${h.icon ? `<img class="weather-hour-icon" src="${weatherIconUrl(h.icon)}" alt="${escapeHtml(h.weather)}" loading="lazy" />` : ""}
+        <div class="weather-hour-desc">${escapeHtml(h.weather)}</div>
+        <div class="weather-hour-temp">${h.temp}°</div>
+        <div class="weather-hour-pop">☔${h.pop}%</div>
+      </div>
+    `;
+  }
+
+  function weatherDetailHtml() {
+    const w = state.weather;
+    const c = w.data.current || {};
+    const city = w.data.city || {};
+    const rows = [];
+    if (c.feelsLike != null) rows.push(["体感温度", `${c.feelsLike}°`]);
+    if (c.humidity != null) rows.push(["湿度", `${c.humidity}%`]);
+    if (c.pressure != null) rows.push(["気圧", `${c.pressure}hPa`]);
+    if (c.windSpeed != null) rows.push(["風速", `${c.windSpeed}m/s`]);
+    if (city.sunrise) rows.push(["日の出", new Date(city.sunrise * 1000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })]);
+    if (city.sunset) rows.push(["日の入り", new Date(city.sunset * 1000).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })]);
+
+    return `
+      <div class="weather-detail">
+        <div class="weather-detail-tag">🌤️ 天気予報詳細</div>
+        <div class="weather-detail-location"><b>${escapeHtml(w.location.displayName)}</b>${city.country ? `（${escapeHtml(city.country)}）` : ""}</div>
+        <div class="weather-detail-current">
+          ${c.icon ? `<img class="weather-detail-current-icon" src="${weatherIconUrl(c.icon)}" alt="${escapeHtml(c.weather || "")}" />` : ""}
+          <div class="weather-detail-current-temp">${c.temp}°</div>
+          <div class="weather-detail-current-desc">${escapeHtml(c.weather || "")}</div>
+        </div>
+        ${rows.length ? `
+          <div class="weather-detail-grid">
+            ${rows.map(([label, value]) => `
+              <div class="weather-detail-row">
+                <span class="weather-detail-label">${label}</span>
+                <span class="weather-detail-value">${value}</span>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
+        <div class="weather-day-grid" style="margin-top:14px;">
+          ${weatherDayCardHtml("今日", w.data.today)}
+          ${weatherDayCardHtml("明日", w.data.tomorrow)}
+        </div>
+        ${(w.data.hourly || []).length ? `
+          <div class="weather-hourly-title">3時間ごとの予報</div>
+          <div class="weather-hourly-list">
+            ${w.data.hourly.map(weatherHourlyRowHtml).join("")}
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }
+
+  function openWeatherDetail() {
+    const w = state.weather;
+    if (!w.data || !w.location) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <div class="modal weather-detail-modal">
+        <button class="modal-close" id="weather-detail-close">✕</button>
+        ${weatherDetailHtml()}
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    function close() {
+      overlay.remove();
+    }
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.getElementById("weather-detail-close").addEventListener("click", close);
+    document.addEventListener("keydown", function onKey(e) {
+      if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
+    });
   }
 
   // ---------------------------------------------------------------- render: auth
@@ -1605,6 +2124,7 @@
           <div class="topbar-actions">
             <div class="ws-indicator"><span class="ws-dot" id="ws-dot"></span></div>
             <button type="button" class="btn btn-ghost" id="my-posts-btn" style="padding:6px 12px; font-size:13px;">マイ投稿</button>
+            <button type="button" class="btn btn-ghost" id="events-btn" style="padding:6px 12px; font-size:13px;">📅 イベント</button>
             <button type="button" class="btn btn-ghost" id="notif-settings-btn" style="padding:6px 12px; font-size:13px;">⚙️ 設定</button>
             ${state.isAdmin ? `<button type="button" class="btn btn-ghost" id="admin-panel-btn" style="padding:6px 12px; font-size:13px;">🛡️ 管理者パネル</button>` : ""}
             <div id="avatar-slot"></div>
@@ -1622,10 +2142,12 @@
               </div>
               <div id="composer-preview-slot"></div>
               <div id="composer-flight-slot"></div>
+              <div id="composer-poll-slot"></div>
               <div class="composer-actions">
                 <div>
                   <button class="icon-btn" id="pick-image-btn" title="画像を追加（複数選択・貼り付け・ドラッグ＆ドロップ対応、最大${MAX_COMPOSER_IMAGES}枚）"><span class="material-symbols-rounded" aria-hidden="true">image</span></button>
                   <input type="file" id="composer-file-input" accept="image/*" multiple class="hidden-file-input" />
+                  <button class="icon-btn" id="pick-poll-btn" title="投票を追加"><span class="material-symbols-rounded" aria-hidden="true">bar_chart</span></button>
                 </div>
                 <div style="display:flex; gap:8px;">
                   <button type="button" class="btn btn-ghost" id="simbrief-import-btn">📋 SimBrief</button>
@@ -1644,13 +2166,17 @@
             <div id="feed-list"></div>
           </div>
 
-          <div class="sidebar sidebar-right" id="popular-flights-slot"></div>
+          <div class="sidebar sidebar-right">
+            <div id="popular-flights-slot"></div>
+            <div id="news-panel-slot"></div>
+          </div>
         </div>
 
         <nav class="mobile-tabbar" id="mobile-tabbar">
           <button type="button" class="tab-btn active" id="tab-home" data-tab="home" title="ホーム"><span class="material-symbols-rounded" aria-hidden="true">home</span></button>
           <button type="button" class="tab-btn" id="tab-flights" data-tab="flights" title="人気のフライト"><span class="material-symbols-rounded" aria-hidden="true">emoji_events</span></button>
           <button type="button" class="tab-btn" id="tab-quake" data-tab="quake" title="地震情報"><span class="material-symbols-rounded" aria-hidden="true">public</span></button>
+          <button type="button" class="tab-btn" id="tab-menu" data-tab="menu" title="メニュー"><span class="material-symbols-rounded" aria-hidden="true">menu</span></button>
         </nav>
       </div>
     `;
@@ -1660,6 +2186,7 @@
     document.getElementById("avatar-slot").innerHTML = avatarHtml(state.user, 34);
     document.getElementById("avatar-slot").addEventListener("click", openProfileModal);
     document.getElementById("my-posts-btn").addEventListener("click", () => openUserProfile(state.user.callsign));
+    document.getElementById("events-btn").addEventListener("click", openEventsModal);
     document.getElementById("notif-settings-btn").addEventListener("click", openNotificationSettingsModal);
     if (state.isAdmin) {
       document.getElementById("admin-panel-btn").addEventListener("click", openAdminPanelModal);
@@ -1667,6 +2194,16 @@
 
     document.getElementById("pick-image-btn").addEventListener("click", () => {
       document.getElementById("composer-file-input").click();
+    });
+
+    document.getElementById("pick-poll-btn").addEventListener("click", () => {
+      if (state.pendingPoll) {
+        // Toggle off: same button removes an in-progress poll builder.
+        state.pendingPoll = null;
+      } else {
+        state.pendingPoll = { options: ["", ""] };
+      }
+      renderComposerPollBuilder();
     });
 
     document.getElementById("composer-file-input").addEventListener("change", (e) => {
@@ -1740,6 +2277,7 @@
 
     renderComposerPreview();
     renderComposerFlightPreview();
+    renderComposerPollBuilder();
     updateWsIndicator();
     renderFeedList();
     renderPopularFlights();
@@ -1774,7 +2312,59 @@
       setActiveTab("quake");
       openMobilePanel("quake");
     });
+    document.getElementById("tab-menu").addEventListener("click", () => {
+      setActiveTab("menu");
+      openMobileMenu();
+    });
   }
+
+  // Bottom-sheet stand-in for the topbar's action buttons (マイ投稿 /
+  // イベント / 設定 / 管理者パネル / プロフィール編集), which are hidden below
+  // the 900px breakpoint (see .topbar-actions in styles.css) so the topbar
+  // only shows the logo there. Everything they did is still reachable from
+  // here via the "menu" tab in .mobile-tabbar.
+  function openMobileMenu() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop mobile-panel-backdrop";
+    overlay.innerHTML = `
+      <div class="modal mobile-panel-sheet">
+        <div class="mobile-panel-sheet-handle"></div>
+        <button class="modal-close" id="mobile-menu-close">✕</button>
+        <h2 style="font-size:15px;">メニュー</h2>
+        <div class="sheet-menu-list">
+          <button type="button" class="btn btn-ghost" id="menu-profile-btn">👤 プロフィール編集</button>
+          <button type="button" class="btn btn-ghost" id="menu-my-posts-btn">📝 マイ投稿</button>
+          <button type="button" class="btn btn-ghost" id="menu-events-btn">📅 イベント</button>
+          <button type="button" class="btn btn-ghost" id="menu-settings-btn">⚙️ 設定</button>
+          ${state.isAdmin ? `<button type="button" class="btn btn-ghost" id="menu-admin-btn">🛡️ 管理者パネル</button>` : ""}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    function close() {
+      overlay.remove();
+      setActiveTab("home");
+    }
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.getElementById("mobile-menu-close").addEventListener("click", close);
+
+    document.getElementById("menu-profile-btn").addEventListener("click", () => { close(); openProfileModal(); });
+    document.getElementById("menu-my-posts-btn").addEventListener("click", () => { close(); openUserProfile(state.user.callsign); });
+    document.getElementById("menu-events-btn").addEventListener("click", () => { close(); openEventsModal(); });
+    document.getElementById("menu-settings-btn").addEventListener("click", () => { close(); openNotificationSettingsModal(); });
+    if (state.isAdmin) {
+      document.getElementById("menu-admin-btn").addEventListener("click", () => { close(); openAdminPanelModal(); });
+    }
+  }
+
+  // Tracks which panel is currently showing in the mobile bottom sheet (or
+  // null if it's closed) — read by renderQuakePanelEverywhere() below so a
+  // weather-search re-render can reach the sheet's #mobile-panel-content
+  // when it's open on "quake", instead of only ever touching the desktop
+  // sidebar's #quake-slot (which is display:none on mobile — see
+  // .mobile-tabbar in styles.css).
+  let mobilePanelKind = null;
 
   // Opens a bottom-sheet modal populated by the same renderer used for the
   // desktop sidebar (renderPopularFlights / renderQuakePanel), just handed
@@ -1792,13 +2382,19 @@
       </div>
     `;
     document.body.appendChild(overlay);
+    mobilePanelKind = kind;
 
     const content = document.getElementById("mobile-panel-content");
-    if (kind === "flights") renderPopularFlights(content);
-    else if (kind === "quake") renderQuakePanel(content);
+    if (kind === "flights") {
+      renderPopularFlights(content);
+      // ニュースは「人気のフライトの下部」という要件をモバイルでも守る
+      // ため、同じボトムシートの続きにappendする(専用タブは増やさない)。
+      renderNewsPanel(content, true);
+    } else if (kind === "quake") renderQuakePanel(content);
 
     function close() {
       overlay.remove();
+      mobilePanelKind = null;
       setActiveTab("home");
     }
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
@@ -1806,6 +2402,84 @@
     document.addEventListener("keydown", function onKey(e) {
       if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
     });
+  }
+
+  // Kept as a thin alias: renderQuakePanel() (no-arg) now does this itself
+  // (see its dispatcher above), so this just avoids having to touch the
+  // weather-search call sites that already use this name.
+  function renderQuakePanelEverywhere() {
+    renderQuakePanel();
+  }
+
+  // Renders the poll option list into #composer-poll-slot from
+  // state.pendingPoll. Only called when the *number* of options changes
+  // (add/remove) — each option <input>'s own "input" listener writes
+  // keystrokes straight into state.pendingPoll.options[i] without
+  // re-rendering, so typing never loses focus or cursor position (same
+  // reasoning as why renderComposerPreview() isn't called per keystroke
+  // elsewhere in the composer).
+  function renderComposerPollBuilder() {
+    const slot = document.getElementById("composer-poll-slot");
+    if (!slot) return;
+    if (!state.pendingPoll) { slot.innerHTML = ""; return; }
+    const { options } = state.pendingPoll;
+
+    slot.innerHTML = `
+      <div class="poll-builder">
+        <div class="poll-builder-head">
+          <span class="material-symbols-rounded" aria-hidden="true">bar_chart</span>
+          投票を作成（本文が質問文になります）
+          <button type="button" class="poll-remove-btn" id="remove-poll-btn" title="投票を削除">✕</button>
+        </div>
+        ${options.map((opt, i) => `
+          <div class="poll-builder-option">
+            <input
+              type="text"
+              class="poll-builder-input"
+              data-poll-option-index="${i}"
+              placeholder="選択肢 ${i + 1}"
+              maxlength="${POLL_MAX_OPTION_LEN}"
+              value="${escapeHtml(opt)}"
+            />
+            ${options.length > POLL_MIN_OPTIONS ? `<button type="button" class="poll-remove-btn" data-remove-poll-option="${i}" title="この選択肢を削除">✕</button>` : ""}
+          </div>
+        `).join("")}
+        ${options.length < POLL_MAX_OPTIONS ? `
+          <button type="button" class="btn btn-ghost poll-builder-add" id="add-poll-option-btn">＋ 選択肢を追加</button>
+        ` : ""}
+      </div>
+    `;
+
+    document.getElementById("remove-poll-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.pendingPoll = null;
+      renderComposerPollBuilder();
+    });
+
+    slot.querySelectorAll("[data-poll-option-index]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const i = Number(input.dataset.pollOptionIndex);
+        if (state.pendingPoll) state.pendingPoll.options[i] = input.value;
+      });
+    });
+
+    slot.querySelectorAll("[data-remove-poll-option]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const i = Number(btn.dataset.removePollOption);
+        state.pendingPoll.options.splice(i, 1);
+        renderComposerPollBuilder();
+      });
+    });
+
+    const addBtn = document.getElementById("add-poll-option-btn");
+    if (addBtn) {
+      addBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        state.pendingPoll.options.push("");
+        renderComposerPollBuilder();
+      });
+    }
   }
 
   function renderComposerFlightPreview() {
@@ -1931,12 +2605,24 @@
   async function onSubmitPost() {
     const textEl = document.getElementById("composer-text");
     const text = textEl.value.trim();
-    if (!text && !state.composerFiles.length && !state.pendingFlight) return;
+
+    // Poll validation happens client-side too (server re-validates
+    // regardless — see POST /api/posts in routes/posts.js) purely so the
+    // person gets immediate feedback instead of a round-trip error.
+    let poll = null;
+    if (state.pendingPoll) {
+      const options = state.pendingPoll.options.map((o) => o.trim()).filter(Boolean);
+      if (!text) { toast("投票には質問文（本文）を入力してください。"); return; }
+      if (options.length < POLL_MIN_OPTIONS) { toast(`選択肢を${POLL_MIN_OPTIONS}個以上入力してください。`); return; }
+      poll = { options };
+    }
+
+    if (!text && !state.composerFiles.length && !state.pendingFlight && !poll) return;
     const btn = document.getElementById("composer-submit");
     btn.disabled = true;
     btn.textContent = "投稿中...";
     try {
-      await createPost(text, state.composerFiles, state.pendingFlight);
+      await createPost(text, state.composerFiles, state.pendingFlight, poll);
       textEl.value = "";
       state.composerPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
       state.composerFiles = [];
@@ -1945,6 +2631,8 @@
       renderComposerPreview();
       state.pendingFlight = null;
       renderComposerFlightPreview();
+      state.pendingPoll = null;
+      renderComposerPollBuilder();
     } catch (err) {
       toast(err.message);
     } finally {
@@ -2126,6 +2814,151 @@
     });
   }
 
+  // 「🗞️ 日本のニュース」パネル。人気のフライトパネルの下部に表示する
+  // (デスクトップは #news-panel-slot、モバイルは「人気のフライト」の
+  // ボトムシートの続きにappendして表示 — openMobilePanel参照)。
+  // targetElを渡さない場合はデスクトップの#news-panel-slotを使い、その
+  // 場合のみ丸ごと置き換える。append=trueの場合はtargetEl内に追記する
+  // (モバイルのボトムシートは人気のフライトと同じ入れ物を共有するため)。
+  function renderNewsPanel(targetEl, append) {
+    const slot = targetEl || document.getElementById("news-panel-slot");
+    if (!slot) return;
+    const list = state.news || [];
+
+    const html = !list.length
+      ? (append || targetEl ? `<div class="quake-empty">まだニュースはありません</div>` : "")
+      : `
+        <div class="news-panel">
+          <div class="news-panel-title"><span>🗞️</span> 日本のニュース</div>
+          <div class="news-panel-list">
+            ${list.slice(0, 20).map((n) => `
+              <button type="button" class="news-item${n.isBreaking ? " news-item-breaking" : ""}" data-news-id="${escapeHtml(n.id)}">
+                ${n.imageUrl
+                  ? `<img class="news-item-thumb" src="${escapeHtml(n.imageUrl)}" loading="lazy" alt="" data-fallback-hue="${hueFromString(n.source || n.title)}" />`
+                  : `<div class="news-item-thumb news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}">🗞️</div>`}
+                <div class="news-item-body">
+                  ${n.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
+                  <div class="news-item-title">${escapeHtml(n.title)}</div>
+                  <div class="news-item-meta">
+                    <span class="news-item-source">${escapeHtml(n.source || "")}</span>
+                    <span>・</span>
+                    <span>${fmtTime(n.publishedAt || n.createdAt)}</span>
+                  </div>
+                </div>
+              </button>
+            `).join("")}
+          </div>
+          <div class="news-panel-credit">Powered by Google ニュース</div>
+        </div>
+      `;
+
+    if (append) {
+      slot.insertAdjacentHTML("beforeend", html);
+    } else {
+      slot.innerHTML = html;
+    }
+
+    slot.querySelectorAll(".news-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        const item = state.news.find((n) => n.id === el.dataset.newsId);
+        if (item) openNewsDetailModal(item);
+      });
+    });
+
+    // 記事から拾ってきた画像(og:image)は、ホットリンク拒否やリンク切れで
+    // 読み込みに失敗することがある。失敗したらその場でフォールバック表示
+    // (色付きの🗞️アイコン)に差し替える。
+    slot.querySelectorAll(".news-item-thumb[data-fallback-hue]").forEach((img) => {
+      img.addEventListener("error", () => swapNewsThumbToFallback(img), { once: true });
+    });
+  }
+
+  function swapNewsThumbToFallback(imgEl) {
+    const hue = imgEl.dataset.fallbackHue || "28";
+    const fallback = document.createElement("div");
+    fallback.className = "news-item-thumb news-item-thumb-fallback";
+    fallback.style.setProperty("--news-hue", hue);
+    fallback.textContent = "🗞️";
+    imgEl.replaceWith(fallback);
+  }
+
+  // クリックした記事の詳細ポップアップ。APITube側の記事本文はここでは
+  // 複製せず、要約(description)と出典・元記事へのリンクだけを見せる
+  // — 出典元の著作権を尊重するため、全文はここに持ち込まない。
+  function openNewsDetailModal(item) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <div class="modal news-detail-modal">
+        <button class="modal-close" id="news-detail-close">✕</button>
+        ${item.imageUrl ? `<img class="news-detail-image" src="${escapeHtml(item.imageUrl)}" alt="" onerror="this.remove()" />` : ""}
+        <div class="news-detail-body">
+          ${item.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
+          ${item.category ? `<span class="news-detail-category">${escapeHtml(item.category)}</span>` : ""}
+          <h2 class="news-detail-title">${escapeHtml(item.title)}</h2>
+          <div class="news-detail-meta">${escapeHtml(item.source || "")} ・ ${fmtTime(item.publishedAt || item.createdAt)}</div>
+          ${item.summary ? `<p class="news-detail-summary">${escapeHtml(item.summary)}</p>` : ""}
+          <a class="btn btn-primary news-detail-link" href="${escapeHtml(item.link)}" target="_blank" rel="noopener noreferrer">元記事を読む ↗</a>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector("#news-detail-close").addEventListener("click", () => overlay.remove());
+    document.addEventListener("keydown", function onKey(e) {
+      if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onKey); }
+    });
+  }
+
+  // 速報(is_breaking)を「緊急地震速報」のポップアップと同じ演出
+  // (画面上部からスライドイン + 自動で消える)で見せる — showEewPopup/
+  // hideEewPopupと対になる、ニュース版。色味はEEW(赤)と混同しないよう
+  // オレンジ系にしてある(see .news-flash-popup in styles.css)。
+  let newsFlashTimer = null;
+
+  function showNewsFlashPopup(item) {
+    let el = document.getElementById("news-flash-popup");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "news-flash-popup";
+      el.className = "news-flash-popup";
+      document.body.appendChild(el);
+    }
+
+    el.innerHTML = `
+      <div class="news-flash-inner" id="news-flash-body">
+        <div class="news-flash-title">🚨 速報</div>
+        <div class="news-flash-headline">${escapeHtml(item.title)}</div>
+        <div class="news-flash-source">${escapeHtml(item.source || "")}</div>
+      </div>
+      <button type="button" class="eew-popup-close" id="news-flash-close" aria-label="閉じる">✕</button>
+    `;
+    el.querySelector("#news-flash-body").addEventListener("click", () => {
+      hideNewsFlashPopup();
+      openNewsDetailModal(item);
+    });
+    el.querySelector("#news-flash-close").addEventListener("click", (e) => {
+      e.stopPropagation();
+      hideNewsFlashPopup();
+    });
+
+    // 同じ理由でshow/reflow/showを打ち直す(showEewPopupと同じ手法) —
+    // 連続で速報が来ても毎回スライドインし直す。
+    el.classList.remove("show");
+    void el.offsetWidth;
+    el.classList.add("show");
+
+    if (newsFlashTimer) clearTimeout(newsFlashTimer);
+    newsFlashTimer = setTimeout(hideNewsFlashPopup, 8000);
+  }
+
+  function hideNewsFlashPopup() {
+    const el = document.getElementById("news-flash-popup");
+    if (!el) return;
+    el.classList.remove("show");
+    if (newsFlashTimer) { clearTimeout(newsFlashTimer); newsFlashTimer = null; }
+  }
+
   // Renders a post's images: a single full-width image, or a grid for
   // multiple images (2-up / 3-up with the first image tall / 4-up).
   function renderPostImages(urls) {
@@ -2138,6 +2971,44 @@
         ${urls.map((url, i) => `
           <img class="post-image-grid-item" data-action="zoom" data-url="${escapeHtml(url)}" src="${escapeHtml(url)}" loading="lazy" alt="投稿画像 ${i + 1}" />
         `).join("")}
+      </div>
+    `;
+  }
+
+  // Renders a poll's options as clickable bars once attached to a post.
+  // Before the viewer has voted, options are plain buttons; after voting
+  // (myVoteOptionId set), every option becomes a percentage bar with the
+  // viewer's own pick highlighted — same pattern X/Twitter-style polls
+  // use, so re-clicking a bar still re-votes (see attachPollListeners).
+  function pollCardHtml(post) {
+    const poll = post.poll;
+    if (!poll) return "";
+    const voted = !!poll.myVoteOptionId;
+    const total = poll.totalVotes;
+    return `
+      <div class="poll-card" data-post-id="${post.id}">
+        ${poll.options.map((opt) => {
+          const pct = total > 0 ? Math.round((opt.voteCount / total) * 100) : 0;
+          const mine = opt.id === poll.myVoteOptionId;
+          if (!voted) {
+            return `
+              <button type="button" class="poll-option-btn" data-action="vote" data-option-id="${opt.id}">
+                ${escapeHtml(opt.text)}
+              </button>
+            `;
+          }
+          return `
+            <button type="button" class="poll-option-result ${mine ? "poll-option-mine" : ""}" data-action="vote" data-option-id="${opt.id}">
+              <span class="poll-option-fill" style="width:${pct}%;"></span>
+              <span class="poll-option-label">
+                ${mine ? '<span class="material-symbols-rounded poll-check" aria-hidden="true">check_circle</span>' : ""}
+                ${escapeHtml(opt.text)}
+              </span>
+              <span class="poll-option-pct">${pct}%</span>
+            </button>
+          `;
+        }).join("")}
+        <div class="poll-meta">${total}票${voted ? " · タップで投票を変更" : ""}</div>
       </div>
     `;
   }
@@ -2170,6 +3041,8 @@
             ${flightCardHtml(post.flight)}
           </div>
         ` : ""}
+
+        ${pollCardHtml(post)}
 
         ${post.imageUrls && post.imageUrls.length ? renderPostImages(post.imageUrls) : ""}
 
@@ -2219,6 +3092,14 @@
         if (onChange) onChange();
       });
     }
+
+    el.querySelectorAll('[data-action="vote"]').forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await voteOnPoll(postId, btn.dataset.optionId);
+        if (onChange) onChange();
+      });
+    });
 
     el.querySelectorAll('[data-action="zoom"]').forEach((img) => {
       img.addEventListener("click", (e) => { e.stopPropagation(); openLightbox(img.dataset.url || img.src); });
@@ -2420,6 +3301,139 @@
     return window.matchMedia("(min-width: 720px)").matches;
   }
 
+  // プロフィールのサイドバーに「好きなアニメ」を複数件並べる。各タイトル
+  // ごとに専用のスロットを作り、renderAnimeCard()にそのまま渡す(1件ずつ
+  // 独立して非同期にWikipedia/Jikanへ問い合わせるので、遅い1件が他の
+  // カードの表示をブロックしない)。
+  function renderAnimeSidebar(container, titles) {
+    if (!container) return;
+    const list = (titles || []).filter(Boolean);
+    if (!list.length) {
+      container.innerHTML = "";
+      return;
+    }
+    container.innerHTML = `
+      <div class="profile-anime-sidebar-title">🎬 好きなアニメなど</div>
+      <div class="profile-anime-sidebar-list">
+        ${list.map((_, i) => `<div id="anime-card-slot-${i}"></div>`).join("")}
+      </div>
+    `;
+    list.forEach((title, i) => {
+      const slot = container.querySelector(`#anime-card-slot-${i}`);
+      if (slot) renderAnimeCard(slot, title);
+    });
+  }
+
+  // ---------------------------------------------------------------- favorite anime card
+  // Looks up `title` on Japanese Wikipedia and renders a small card (cover
+  // image + あらすじ excerpt) into `container`. Everything here talks
+  // directly to Wikipedia's public APIs from the browser — both endpoints
+  // below are CORS-enabled (the REST summary endpoint always is; the
+  // legacy action API needs the `origin=*` query param) — so no backend
+  // proxy is needed. Fails silently (falls back to a plain title/link)
+  // since a missing/renamed anime page shouldn't break the whole profile.
+  async function renderAnimeCard(container, title) {
+    container.innerHTML = `
+      <div class="anime-card">
+        <div class="anime-card-body">
+          <div class="anime-card-label">好きなアニメ</div>
+          <div class="anime-card-title">${escapeHtml(title)}</div>
+          <div class="anime-card-loading">Wikipediaから情報を取得中...</div>
+        </div>
+      </div>
+    `;
+
+    try {
+      // 1. Resolve the user's freeform text to an actual Wikipedia page
+      // title (handles typos/partial titles/redirected names).
+      const searchRes = await fetch(
+        `https://ja.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*&srlimit=1&srsearch=${encodeURIComponent(title)}`
+      );
+      const searchData = await searchRes.json();
+      const hit = searchData?.query?.search?.[0];
+      const pageTitle = hit ? hit.title : title;
+      const pageUrl = `https://ja.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}`;
+
+      // 2. Cover image + a lead-extract fallback, via the REST summary
+      // endpoint (always CORS-enabled, no origin param needed).
+      let image = null;
+      let fallbackExtract = "";
+      try {
+        const summaryRes = await fetch(
+          `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}`
+        );
+        if (summaryRes.ok) {
+          const summaryData = await summaryRes.json();
+          image = summaryData.originalimage?.source || summaryData.thumbnail?.source || null;
+          fallbackExtract = summaryData.extract || "";
+        }
+      } catch { /* image/extract are optional, page link + title still render */ }
+
+      // 2b. Wikipediaに画像が無かった場合のフォールバック: Jikan API
+      // (MyAnimeList)からカバー画像を取得(自前のバックエンド経由 —
+      // routes/animeImage.js参照)。ここも失敗しても致命的ではないので
+      // 黙って諦め、画像無しのカードとして表示する。
+      if (!image) {
+        try {
+          const fallbackImageRes = await fetch(`/api/anime-image?q=${encodeURIComponent(pageTitle)}`);
+          if (fallbackImageRes.ok) {
+            const fallbackImageData = await fallbackImageRes.json();
+            if (fallbackImageData.image) image = fallbackImageData.image;
+          }
+        } catch { /* no image at all is fine, card still renders without one */ }
+      }
+
+      // 3. The actual あらすじ section, if the page has one — anime/manga
+      // articles almost always do, but the lead extract above is a
+      // reasonable stand-in when they don't.
+      let synopsis = fallbackExtract;
+      try {
+        const sectionsRes = await fetch(
+          `https://ja.wikipedia.org/w/api.php?action=parse&format=json&origin=*&prop=sections&page=${encodeURIComponent(pageTitle)}`
+        );
+        const sectionsData = await sectionsRes.json();
+        const section = sectionsData?.parse?.sections?.find((s) => s.line === "あらすじ" || s.line === "概要");
+        if (section) {
+          const textRes = await fetch(
+            `https://ja.wikipedia.org/w/api.php?action=parse&format=json&origin=*&prop=text&page=${encodeURIComponent(pageTitle)}&section=${section.index}`
+          );
+          const textData = await textRes.json();
+          const html = textData?.parse?.text?.["*"] || "";
+          const plain = html
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+            .replace(/<[^>]+>/g, "")
+            .replace(/\[\d+\]/g, "")
+            .replace(/\s+\n/g, "\n")
+            .trim();
+          if (plain) synopsis = plain;
+        }
+      } catch { /* fall back to fallbackExtract set above */ }
+
+      container.innerHTML = `
+        <div class="anime-card${image ? " anime-card--has-image" : ""}">
+          ${image ? `<img class="anime-card-bg-image" src="${escapeHtml(image)}" alt="" aria-hidden="true" />` : ""}
+          ${image ? `<div class="anime-card-overlay"></div>` : ""}
+          <div class="anime-card-body">
+            <div class="anime-card-label">好きなアニメ</div>
+            <div class="anime-card-title"><a href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(pageTitle)}</a></div>
+            ${synopsis ? `<div class="anime-card-synopsis">${escapeHtml(synopsis)}</div>` : ""}
+          </div>
+        </div>
+      `;
+    } catch {
+      // Network/lookup failure: still show the title the user entered,
+      // just without image/synopsis, rather than an empty gap.
+      container.innerHTML = `
+        <div class="anime-card">
+          <div class="anime-card-body">
+            <div class="anime-card-label">好きなアニメ</div>
+            <div class="anime-card-title">${escapeHtml(title)}</div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
   async function openUserProfile(callsign) {
     const overlay = document.createElement("div");
     overlay.className = "modal-backdrop";
@@ -2428,7 +3442,10 @@
         <button class="modal-close" id="profile-view-close">✕</button>
         <div class="profile-columns">
           <div id="profile-view-slot" class="profile-main-col"><div class="spinner-row">読み込み中...</div></div>
-          <div id="profile-follow-panel" class="profile-follow-panel"></div>
+          <div class="profile-side-col">
+            <div id="profile-anime-sidebar" class="profile-anime-sidebar"></div>
+            <div id="profile-follow-panel" class="profile-follow-panel"></div>
+          </div>
         </div>
       </div>
     `;
@@ -2546,6 +3563,8 @@
         </div>
         <div id="profile-view-posts"></div>
       `;
+
+      renderAnimeSidebar(overlay.querySelector("#profile-anime-sidebar"), user.favoriteAnimeList);
 
       const followBtn = slot.querySelector("#profile-follow-btn-slot");
       if (followBtn) {
@@ -3106,6 +4125,371 @@
     });
   }
 
+  // ---------------------------------------------------------------- events (イベント機能)
+  // A single modal covers both the browsable list (upcoming/past tabs) and
+  // the create form (toggled inline within the same modal, same on/off
+  // pattern as pendingPoll in the composer). Clicking an event card opens
+  // its detail (participant list) in a second, stacked popup — same
+  // "second modal on top" pattern openFollowListPopup uses from the
+  // profile view.
+  function eventTypeLabel(eventType) {
+    return eventType === "flight" ? "✈️ フライト" : "🎉 イベント";
+  }
+
+  function eventWhenWhereLine(ev) {
+    if (ev.eventType === "flight") {
+      const route = [ev.departureIcao, ev.arrivalIcao].filter(Boolean).join(" → ");
+      return route || "空港未定";
+    }
+    return ev.location || "場所未定";
+  }
+
+  function eventCapacityLabel(ev) {
+    return ev.capacity != null ? `${ev.participantCount} / ${ev.capacity}人` : `${ev.participantCount}人`;
+  }
+
+  function eventCardHtml(ev) {
+    const full = ev.capacity != null && ev.participantCount >= ev.capacity && !ev.isJoined;
+    return `
+      <div class="event-card" data-event-id="${ev.id}">
+        <div class="event-card-top">
+          <span class="event-type-badge">${eventTypeLabel(ev.eventType)}</span>
+          <span class="event-card-when">${fmtEventDateTime(ev.startsAt)}</span>
+        </div>
+        <div class="event-card-title">${escapeHtml(ev.title)}</div>
+        <div class="event-card-meta">
+          <span>📍 ${escapeHtml(eventWhenWhereLine(ev))}</span>
+          <span>👥 ${eventCapacityLabel(ev)}</span>
+        </div>
+        <div class="event-card-bottom">
+          <span class="event-card-creator">${avatarHtml({ name: ev.creatorName, callsign: ev.creatorCallsign, hue: ev.creatorHue, avatarUrl: ev.creatorAvatarUrl }, 20)} ${escapeHtml(ev.creatorCallsign)}</span>
+          <button type="button" class="btn ${ev.isJoined ? "btn-ghost" : "btn-primary"} event-join-btn" data-event-id="${ev.id}" data-joined="${ev.isJoined ? "1" : "0"}" style="padding:5px 12px; font-size:12px;" ${full ? "disabled" : ""}>
+            ${ev.isJoined ? "参加中 ✓" : (full ? "満員" : "参加する")}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function openEventsModal() {
+    const evState = {
+      tab: "upcoming",
+      events: [],
+      loading: false,
+      error: "",
+      showCreateForm: false,
+    };
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <div class="modal events-modal">
+        <button class="modal-close" id="events-close">✕</button>
+        <h2>📅 イベント</h2>
+        <div class="tabs">
+          <button type="button" data-tab="upcoming" class="active">開催予定</button>
+          <button type="button" data-tab="past">過去のイベント</button>
+        </div>
+        <div style="margin:12px 0;">
+          <button type="button" class="btn btn-primary btn-block" id="event-create-toggle">+ イベントを作成</button>
+        </div>
+        <div id="event-create-slot"></div>
+        <div id="event-list-slot"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById("events-close").addEventListener("click", () => overlay.remove());
+
+    overlay.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        evState.tab = btn.dataset.tab;
+        overlay.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+        loadEvents();
+      });
+    });
+
+    const listSlot = document.getElementById("event-list-slot");
+    const createSlot = document.getElementById("event-create-slot");
+
+    async function loadEvents() {
+      evState.loading = true;
+      evState.error = "";
+      renderList();
+      try {
+        const { events } = await api(`/api/events?scope=${evState.tab}`);
+        evState.events = events;
+      } catch (err) {
+        evState.error = err.message;
+      } finally {
+        evState.loading = false;
+        renderList();
+      }
+    }
+
+    function renderList() {
+      if (evState.loading) {
+        listSlot.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+        return;
+      }
+      if (evState.error) {
+        listSlot.innerHTML = `<div class="error-banner">${escapeHtml(evState.error)}</div>`;
+        return;
+      }
+      if (!evState.events.length) {
+        listSlot.innerHTML = `<div class="empty-state">${evState.tab === "upcoming" ? "開催予定のイベントはまだありません。" : "過去のイベントはありません。"}</div>`;
+        return;
+      }
+      listSlot.innerHTML = evState.events.map(eventCardHtml).join("");
+
+      listSlot.querySelectorAll(".event-join-btn").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.eventId;
+          const joined = btn.dataset.joined === "1";
+          btn.disabled = true;
+          try {
+            await api(`/api/events/${id}/${joined ? "leave" : "join"}`, { method: "POST" });
+            await loadEvents();
+          } catch (err) {
+            toast(err.message);
+            btn.disabled = false;
+          }
+        });
+      });
+
+      listSlot.querySelectorAll(".event-card").forEach((card) => {
+        card.addEventListener("click", () => openEventDetail(card.dataset.eventId, loadEvents));
+      });
+    }
+
+    // ---------------- create form ----------------
+    const createState = { eventType: "general", capacityEnabled: false };
+
+    function renderCreateForm() {
+      if (!evState.showCreateForm) {
+        createSlot.innerHTML = "";
+        return;
+      }
+      const defaultStart = new Date(Date.now() + 24 * 60 * 60 * 1000); // +1日後をデフォルト表示
+      defaultStart.setMinutes(0, 0, 0);
+
+      createSlot.innerHTML = `
+        <form id="event-create-form" class="event-create-form">
+          <div class="field">
+            <label>種別</label>
+            <div style="display:flex; gap:16px;">
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
+                <input type="radio" name="event-type" value="general" ${createState.eventType === "general" ? "checked" : ""} style="width:auto;" />
+                🎉 一般イベント（オフ会・配信など）
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
+                <input type="radio" name="event-type" value="flight" ${createState.eventType === "flight" ? "checked" : ""} style="width:auto;" />
+                ✈️ 集合フライト
+              </label>
+            </div>
+          </div>
+          <div class="field">
+            <label>タイトル</label>
+            <input type="text" id="event-title" maxlength="${TITLE_MAX_LEN_CLIENT}" required placeholder="例: 週末オフ会 / 羽田→新千歳 集合フライト" />
+          </div>
+          <div class="field">
+            <label>説明（任意）</label>
+            <textarea id="event-description" rows="3" maxlength="2000" placeholder="内容や集合方法など"></textarea>
+          </div>
+          <div class="field" id="event-location-field">
+            <label>場所（任意）</label>
+            <input type="text" id="event-location" maxlength="100" placeholder="例: Discordボイスチャット / YouTube Live" />
+          </div>
+          <div class="field" id="event-route-field" style="display:none;">
+            <label>出発 / 到着空港（任意・ICAOコード）</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="event-departure" maxlength="10" placeholder="例: RJTT" style="text-transform:uppercase;" />
+              <input type="text" id="event-arrival" maxlength="10" placeholder="例: RJCC" style="text-transform:uppercase;" />
+            </div>
+          </div>
+          <div class="field" style="display:flex; gap:12px;">
+            <div style="flex:1;">
+              <label>開催日時</label>
+              <input type="datetime-local" id="event-starts-at" required value="${toDateTimeLocalValue(defaultStart)}" />
+            </div>
+            <div style="flex:1;">
+              <label>終了日時（任意）</label>
+              <input type="datetime-local" id="event-ends-at" />
+            </div>
+          </div>
+          <div class="field" style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="event-capacity-toggle" style="width:auto;" />
+            <label style="margin:0; font-weight:400;">定員を設定する</label>
+            <input type="number" id="event-capacity" min="1" max="500" value="10" style="max-width:100px; margin-left:8px;" disabled />
+          </div>
+          <div class="field" style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="event-notify-discord" style="width:auto;" />
+            <label style="margin:0; font-weight:400;">Discordに通知する</label>
+          </div>
+          <p id="event-create-error" class="error-banner" style="display:none;"></p>
+          <button type="submit" class="btn btn-primary btn-block" id="event-create-submit">作成する</button>
+        </form>
+      `;
+
+      const typeRadios = createSlot.querySelectorAll('input[name="event-type"]');
+      const locationField = document.getElementById("event-location-field");
+      const routeField = document.getElementById("event-route-field");
+      function syncTypeFields() {
+        const isFlight = createState.eventType === "flight";
+        locationField.style.display = isFlight ? "none" : "";
+        routeField.style.display = isFlight ? "" : "none";
+      }
+      syncTypeFields();
+      typeRadios.forEach((r) => {
+        r.addEventListener("change", () => {
+          createState.eventType = r.value;
+          syncTypeFields();
+        });
+      });
+
+      const capacityToggle = document.getElementById("event-capacity-toggle");
+      const capacityInput = document.getElementById("event-capacity");
+      capacityToggle.addEventListener("change", () => {
+        capacityInput.disabled = !capacityToggle.checked;
+      });
+
+      document.getElementById("event-create-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const errorEl = document.getElementById("event-create-error");
+        errorEl.style.display = "none";
+        const submitBtn = document.getElementById("event-create-submit");
+        submitBtn.disabled = true;
+
+        const startsAtLocal = document.getElementById("event-starts-at").value;
+        const endsAtLocal = document.getElementById("event-ends-at").value;
+        const body = {
+          eventType: createState.eventType,
+          title: document.getElementById("event-title").value,
+          description: document.getElementById("event-description").value,
+          startsAt: startsAtLocal ? new Date(startsAtLocal).toISOString() : "",
+          endsAt: endsAtLocal ? new Date(endsAtLocal).toISOString() : null,
+          notifyDiscord: document.getElementById("event-notify-discord").checked,
+          capacity: capacityToggle.checked ? Number(capacityInput.value) : null,
+        };
+        if (createState.eventType === "flight") {
+          body.departureIcao = document.getElementById("event-departure").value;
+          body.arrivalIcao = document.getElementById("event-arrival").value;
+        } else {
+          body.location = document.getElementById("event-location").value;
+        }
+
+        try {
+          await api("/api/events", { method: "POST", body: JSON.stringify(body) });
+          toast("イベントを作成しました");
+          evState.showCreateForm = false;
+          renderCreateForm();
+          evState.tab = "upcoming";
+          overlay.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "upcoming"));
+          loadEvents();
+        } catch (err) {
+          errorEl.textContent = err.message;
+          errorEl.style.display = "block";
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    }
+
+    document.getElementById("event-create-toggle").addEventListener("click", (e) => {
+      evState.showCreateForm = !evState.showCreateForm;
+      e.target.textContent = evState.showCreateForm ? "− 閉じる" : "+ イベントを作成";
+      renderCreateForm();
+    });
+
+    loadEvents();
+  }
+
+  // Kept in sync with TITLE_MAX_LEN in src/routes/events.js — purely a UX
+  // nicety (maxlength on the input), the server re-validates regardless.
+  const TITLE_MAX_LEN_CLIENT = 100;
+
+  // Detail popup for a single event: participant list + delete (own/admin
+  // only). `onChange` is called after a join/leave/delete so the list
+  // behind it can refresh its counts.
+  function openEventDetail(eventId, onChange) {
+    const popup = document.createElement("div");
+    popup.className = "modal-backdrop";
+    popup.innerHTML = `
+      <div class="modal" style="max-width:420px;">
+        <button class="modal-close" id="event-detail-close">✕</button>
+        <div id="event-detail-body"><div class="spinner-row">読み込み中...</div></div>
+      </div>
+    `;
+    document.body.appendChild(popup);
+    popup.addEventListener("click", (e) => { if (e.target === popup) popup.remove(); });
+    document.getElementById("event-detail-close").addEventListener("click", () => popup.remove());
+
+    const body = document.getElementById("event-detail-body");
+
+    async function load() {
+      try {
+        const { event: ev, participants } = await api(`/api/events/${eventId}`);
+        const participantsHtml = participants.length
+          ? participants.map((p) => `
+              <div class="event-participant-row">
+                ${avatarHtml(p, 24)}
+                <span>${escapeHtml(p.callsign)}</span>
+              </div>
+            `).join("")
+          : `<div class="empty-state" style="padding:20px;">まだ参加者がいません。</div>`;
+
+        body.innerHTML = `
+          <span class="event-type-badge">${eventTypeLabel(ev.eventType)}</span>
+          <h3 style="margin:10px 0 4px;">${escapeHtml(ev.title)}</h3>
+          <div style="color:var(--text-dim); font-size:13px; margin-bottom:10px;">
+            🕒 ${fmtEventDateTime(ev.startsAt)}${ev.endsAt ? ` 〜 ${fmtEventDateTime(ev.endsAt)}` : ""}<br />
+            📍 ${escapeHtml(eventWhenWhereLine(ev))}<br />
+            👥 ${eventCapacityLabel(ev)}
+          </div>
+          ${ev.description ? `<p style="white-space:pre-wrap; margin-bottom:14px;">${linkify(escapeHtml(ev.description))}</p>` : ""}
+          <div style="display:flex; gap:8px; margin-bottom:14px;">
+            <button type="button" class="btn ${ev.isJoined ? "btn-ghost" : "btn-primary"} btn-block" id="event-detail-join-btn">
+              ${ev.isJoined ? "参加を取り消す" : "参加する"}
+            </button>
+            ${ev.isMine || state.isAdmin ? `<button type="button" class="btn btn-danger" id="event-detail-delete-btn">削除</button>` : ""}
+          </div>
+          <h4 style="margin:0 0 8px; font-size:13px; color:var(--text-dim);">参加者（${ev.participantCount}人）</h4>
+          <div class="event-participant-list">${participantsHtml}</div>
+        `;
+
+        document.getElementById("event-detail-join-btn").addEventListener("click", async () => {
+          try {
+            await api(`/api/events/${eventId}/${ev.isJoined ? "leave" : "join"}`, { method: "POST" });
+            await load();
+            if (onChange) onChange();
+          } catch (err) {
+            toast(err.message);
+          }
+        });
+
+        const deleteBtn = document.getElementById("event-detail-delete-btn");
+        if (deleteBtn) {
+          deleteBtn.addEventListener("click", async () => {
+            if (!confirm("このイベントを削除しますか？")) return;
+            try {
+              await api(`/api/events/${eventId}`, { method: "DELETE" });
+              toast("イベントを削除しました");
+              popup.remove();
+              if (onChange) onChange();
+            } catch (err) {
+              toast(err.message);
+            }
+          });
+        }
+      } catch (err) {
+        body.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    load();
+  }
+
   // ---------------------------------------------------------------- admin panel
   // Backed entirely by /api/admin/* (see routes/admin.js) — every request
   // below already requires requireAuth + requireAdmin server-side, so this
@@ -3606,6 +4990,18 @@
             <label>自己紹介</label>
             <textarea name="bio" maxlength="280">${escapeHtml(state.user.bio || "")}</textarea>
           </div>
+          <div class="field">
+            <label>好きなアニメ</label>
+            <div id="favorite-anime-editor" class="anime-editor">
+              ${(state.user.favoriteAnimeList && state.user.favoriteAnimeList.length ? state.user.favoriteAnimeList : [""]).map((title) => `
+                <div class="anime-editor-row">
+                  <input type="text" class="anime-editor-input" value="${escapeHtml(title)}" maxlength="100" placeholder="例: 機動戦士ガンダム" />
+                  <button type="button" class="anime-editor-remove" aria-label="削除">✕</button>
+                </div>
+              `).join("")}
+            </div>
+            <button type="button" class="btn btn-ghost btn-block" id="anime-editor-add">+ アニメを追加</button>
+          </div>
           ${state.error ? `<div class="error-banner">${escapeHtml(state.error)}</div>` : ""}
           <div style="display:flex; gap:10px; margin-top: 6px;">
             <button type="submit" class="btn btn-primary" id="profile-save" style="flex:1">保存</button>
@@ -3633,9 +5029,38 @@
         `<img class="avatar" style="width:72px;height:72px" src="${pendingAvatarPreview}" alt="preview" />`;
     });
 
+    // 好きなアニメの行を増減する。最大10件(サーバー側の上限と合わせる)。
+    const ANIME_MAX = 10;
+    const animeEditor = document.getElementById("favorite-anime-editor");
+    function addAnimeRow(focus) {
+      if (animeEditor.querySelectorAll(".anime-editor-row").length >= ANIME_MAX) return;
+      const row = document.createElement("div");
+      row.className = "anime-editor-row";
+      row.innerHTML = `
+        <input type="text" class="anime-editor-input" maxlength="100" placeholder="例: 機動戦士ガンダム" />
+        <button type="button" class="anime-editor-remove" aria-label="削除">✕</button>
+      `;
+      animeEditor.appendChild(row);
+      if (focus) row.querySelector("input").focus();
+    }
+    animeEditor.addEventListener("click", (e) => {
+      const btn = e.target.closest(".anime-editor-remove");
+      if (!btn) return;
+      const rows = animeEditor.querySelectorAll(".anime-editor-row");
+      if (rows.length <= 1) {
+        btn.closest(".anime-editor-row").querySelector("input").value = "";
+      } else {
+        btn.closest(".anime-editor-row").remove();
+      }
+    });
+    document.getElementById("anime-editor-add").addEventListener("click", () => addAnimeRow(true));
+
     document.getElementById("profile-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
+      const favoriteAnimeList = Array.from(animeEditor.querySelectorAll(".anime-editor-input"))
+        .map((input) => input.value.trim())
+        .filter(Boolean);
       const saveBtn = document.getElementById("profile-save");
       saveBtn.disabled = true;
       saveBtn.textContent = "保存中...";
@@ -3644,6 +5069,7 @@
           name: fd.get("name"),
           homeBase: fd.get("homeBase"),
           bio: fd.get("bio"),
+          favoriteAnimeList,
           avatarFile: pendingAvatarFile,
         });
         overlay.remove();

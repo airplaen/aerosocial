@@ -57,10 +57,14 @@
  *   即時トリガーに変更している）。
  *
  * 重複投稿防止:
- * - FSAの生データにセッション開始時刻らしきキーがあればそれを、なければ
- *   ブリッジ側で最初に検出した時刻を「セッションキー」として
- *   data/fsa-bridge-state.json に pilot_id ごとに記録し、直前と同じ
- *   セッションキーならスキップする。
+ * - FSAの生データにセッション開始時刻らしきキーがあればそれを「セッション
+ *   キー」として使う。無い場合は出発地・到着地・コールサイン・機種という
+ *   フライト中は変化しない値の組み合わせを使う（v3.1、旧: ブリッジ側で
+ *   検出した時刻=Date.now()を使っていたが、これは呼ぶ度に値が変わってしまい、
+ *   ブリッジの再起動やSSEの瞬断で "offline"→再検出が起きる度に同じフライ
+ *   トを重複投稿する原因になっていた）。
+ * - このセッションキーを data/fsa-bridge-state.json に pilot_id ごとに
+ *   記録し、直前と同じセッションキーならスキップする。
  *
  * MSFSの「デベロッパーモード」について:
  * - MSFS本体のDEVELOPER MODEをONにすると、実績(ACHIEVEMENTS)の累積処理と
@@ -388,7 +392,41 @@ function missingRequiredFields(flight) {
 
 function sessionKeyFor(liveData) {
   const v = pick(liveData, SESSION_KEY_CANDIDATES);
-  return v !== undefined ? String(v) : null;
+  if (v !== undefined) return String(v);
+
+  // SESSION_KEY_CANDIDATES がどれもヒットしない場合のフォールバック。
+  // 以前はここで `t:${Date.now()}` を都度生成していたが、これは
+  // 「呼ばれる度に必ず違う値」になってしまい、実質的にセッションキーとして
+  // 機能していなかった。具体的には:
+  //   - ブリッジの再起動（pm2再起動・デプロイ・クラッシュ復帰）
+  //   - SSEの瞬断で "offline" イベントが来て clearTracking() された後、
+  //     同じフライトのまま "snapshot"/"update" が再度来て追跡し直す場合
+  // のどちらでも、まだ飛行中の同一フライトに対して新しい
+  // fallbackキーが生成され、data/fsa-bridge-state.json に保存済みの
+  // 前回のキーと一致しなくなるため、重複投稿が起きていた。
+  //
+  // 代わりに、出発地・到着地・コールサイン・機種というフライト開始時に
+  // 決まり、通常は同一フライト中に変化しない値を組み合わせて使う。
+  // これなら再起動やSSEの瞬断を挟んでも同じキーになり、既存の
+  // 「直前と同じセッションキーならスキップ」ロジックが正しく働く。
+  // トレードオフ: 同じパイロットが同一区間・同一機種で連続して2回
+  // フライトした場合はごく稀に取りこぼす可能性があるが、重複投稿の方が
+  // 実害が大きいためこちらを優先する。
+  const stableParts = [
+    pick(liveData, FIELD_CANDIDATES.originIcao),
+    pick(liveData, FIELD_CANDIDATES.destIcao),
+    pick(liveData, FIELD_CANDIDATES.callsign),
+    pick(liveData, FIELD_CANDIDATES.aircraftIcao),
+  ].map((p) => (p === undefined || p === null ? "" : String(p)));
+
+  if (stableParts.some((p) => p !== "")) {
+    return `flight:${stableParts.join("|")}`;
+  }
+
+  // 出発地・到着地・コールサイン・機種のいずれも取得できない場合のみ、
+  // 最終手段としてタイムスタンプを使う（この場合は元々セッションの
+  // 一意性を判定する材料がないため、重複防止は保証できない）。
+  return `t:${Date.now()}`;
 }
 
 // ------------------------------------------------------------ FSA側クライアント
@@ -503,7 +541,8 @@ async function maybePostForPilot(pilotId, entry) {
 
   try {
     const liveData = await fetchFsaLiveDetail(pilotId);
-    const sessionKey = sessionKeyFor(liveData) || `t:${Date.now()}`;
+    // sessionKeyFor は常に文字列を返す（フォールバックの生成も内部で行う）
+    const sessionKey = sessionKeyFor(liveData);
 
     if (postedSessions[pilotId] === sessionKey) {
       debugLog(`pilot_id=${pilotId}: 同じセッションを既に投稿済みなのでスキップします。`);

@@ -178,6 +178,126 @@ function main() {
   );
   console.log("Ensured fsa_pilot_id unique index exists.");
 
+  // --- Poll support (投票機能) -----------------------------------------
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // follows/push_subscriptions/ad_settings tables: guarantees these exist
+  // regardless of whether the first db.exec(sql) aborted partway through.
+  // Harmless no-op if schema.sql already created them.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS polls (
+      post_id    TEXT PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS poll_options (
+      id       TEXT PRIMARY KEY,
+      post_id  TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      text     TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_poll_options_post ON poll_options (post_id, position)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      post_id    TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      option_id  TEXT NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      PRIMARY KEY (post_id, user_id)
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_poll_votes_post ON poll_votes (post_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_poll_votes_option ON poll_votes (option_id)");
+  console.log("Ensured polls/poll_options/poll_votes tables exist.");
+
+  // --- Events support (イベント機能) -----------------------------------
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // other feature tables: guarantees these exist regardless of whether the
+  // first db.exec(sql) aborted partway through. Harmless no-op if
+  // schema.sql already created them.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS events (
+      id             TEXT PRIMARY KEY,
+      creator_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_type     TEXT NOT NULL DEFAULT 'general' CHECK (event_type IN ('flight', 'general')),
+      title          TEXT NOT NULL,
+      description    TEXT,
+      starts_at      TEXT NOT NULL,
+      ends_at        TEXT,
+      location       TEXT,
+      departure_icao TEXT,
+      arrival_icao   TEXT,
+      capacity       INTEGER,
+      notify_discord INTEGER NOT NULL DEFAULT 0,
+      created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS event_participants (
+      event_id   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      PRIMARY KEY (event_id, user_id)
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_events_starts_at ON events (starts_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_event_participants_event ON event_participants (event_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_event_participants_user ON event_participants (user_id)");
+  console.log("Ensured events/event_participants tables exist.");
+
+  // --- 好きなアニメ (プロフィール表示欄) ---------------------------------
+  // For databases created before this field existed: same
+  // add-column-if-missing pattern as avatar_path/google_id above.
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN favorite_anime TEXT");
+    console.log("Added favorite_anime column to users.");
+  } catch (err) {
+    if (!/duplicate column/i.test(err.message)) throw err;
+  }
+
+  // --- 好きなアニメ紹介画像のキャッシュ (Jikan API) ----------------------
+  // GET /api/anime-image はJikan(MyAnimeListの非公式API)を毎回叩いていたが、
+  // Jikan自体がMAL側への接続に失敗して504を返すことがある(不安定な外部API)
+  // ため、一度取得できた画像URLは検索キーワード単位でここに保存し、以降は
+  // Jikanを叩かずキャッシュから即返せるようにする。失敗した結果はキャッシュ
+  // しない(次回また取得を試みられるようにするため)。
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // other feature tables: harmless no-op if schema.sql already created it.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS anime_image_cache (
+      query_key     TEXT PRIMARY KEY,
+      image         TEXT NOT NULL,
+      source_page   TEXT,
+      matched_title TEXT,
+      created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  console.log("Ensured anime_image_cache table exists.");
+
+  // --- ニュースパネル (APITube News API) ------------------------------
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // other feature tables: guarantees this exists regardless of whether the
+  // first db.exec(sql) aborted partway through. Harmless no-op if
+  // schema.sql already created it. See src/services/newsFeed.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS news_items (
+      id           TEXT PRIMARY KEY,
+      title        TEXT NOT NULL,
+      summary      TEXT,
+      link         TEXT NOT NULL,
+      source       TEXT,
+      category     TEXT,
+      image_url    TEXT,
+      is_breaking  INTEGER NOT NULL DEFAULT 0,
+      published_at TEXT,
+      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC)");
+  console.log("Ensured news_items table exists.");
+
   db.close();
   console.log("Done.");
 }

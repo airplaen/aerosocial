@@ -6,10 +6,69 @@ const { requireAuth, optionalAuth } = require("../middleware/auth");
 const upload = require("../middleware/upload");
 const { broadcast } = require("../ws");
 const push = require("../lib/push");
+// Discord Bot通知。この下で定義しているプッシュ通知用の notifyNewPost と
+// 名前が衝突するため、インポート時に notifyDiscordNewPost としてリネーム。
+const { notifyNewPost: notifyDiscordNewPost } = require("../services/discordNotify");
 
 const router = express.Router();
 
-function serializePost(row, viewerId) {
+// Poll limits (投票機能): kept generous but bounded — the composer/vote UI
+// on the client enforces the same numbers, this is the server-side backstop.
+const POLL_MIN_OPTIONS = 2;
+const POLL_MAX_OPTIONS = 6;
+const POLL_MAX_OPTION_LEN = 60;
+
+// Fetches poll + option + vote-count data for a batch of post ids in two
+// queries total (not one query per post), and returns a Map keyed by
+// post_id so serializePost can attach it synchronously below. `viewerId`
+// (nullable) is used to mark which option, if any, the current viewer
+// voted for.
+async function loadPollsForPosts(postIds, viewerId) {
+  const pollsByPost = new Map();
+  if (!postIds.length) return pollsByPost;
+
+  const placeholders = postIds.map((_, i) => `$${i + 1}`).join(", ");
+  const optionsResult = await pool.query(
+    `SELECT po.id, po.post_id, po.text, po.position,
+            COALESCE(v.vote_count, 0) AS vote_count
+     FROM poll_options po
+     LEFT JOIN (SELECT option_id, COUNT(*) AS vote_count FROM poll_votes GROUP BY option_id) v
+       ON v.option_id = po.id
+     WHERE po.post_id IN (${placeholders})
+     ORDER BY po.post_id, po.position ASC`,
+    postIds
+  );
+  if (!optionsResult.rows.length) return pollsByPost;
+
+  // viewerId may be null (logged-out visitor) — pool.query's `$N` params
+  // are positional, so this only needs one extra placeholder appended.
+  const myVotes = new Map();
+  if (viewerId) {
+    // db.js's $N -> "?" conversion binds purely by position in the SQL
+    // text (its own comment: placeholders are "used sequentially and
+    // never reused/reordered"), so $N must count up in the order the
+    // placeholders appear here — the IN(...) list first, then viewerId —
+    // matching the params array order below exactly.
+    const votesResult = await pool.query(
+      `SELECT post_id, option_id FROM poll_votes WHERE post_id IN (${placeholders}) AND user_id = $${postIds.length + 1}`,
+      [...postIds, viewerId]
+    );
+    votesResult.rows.forEach((r) => myVotes.set(r.post_id, r.option_id));
+  }
+
+  optionsResult.rows.forEach((row) => {
+    if (!pollsByPost.has(row.post_id)) {
+      pollsByPost.set(row.post_id, { totalVotes: 0, myVoteOptionId: myVotes.get(row.post_id) || null, options: [] });
+    }
+    const poll = pollsByPost.get(row.post_id);
+    poll.options.push({ id: row.id, text: row.text, voteCount: Number(row.vote_count) });
+    poll.totalVotes += Number(row.vote_count);
+  });
+
+  return pollsByPost;
+}
+
+function serializePost(row, viewerId, poll) {
   // `image_paths` is a "||"-joined list built by FEED_QUERY's post_images
   // subquery, already ordered by position. Fall back to the legacy single
   // `image_path` column for posts created before multi-image support
@@ -40,8 +99,21 @@ function serializePost(row, viewerId) {
     // Total number of flight-type posts by this author, shown as a badge
     // next to the post (based on the flight cards they've posted).
     authorFlightCount: Number(row.author_flight_count || 0),
+    // Poll data (投票機能), attached by the caller via loadPollsForPosts —
+    // null for posts with no poll. Not fetched by a FEED_QUERY subquery
+    // like likeCount/commentCount since a poll has a variable number of
+    // options; see loadPollsForPosts for why this is a separate batch query.
+    poll: poll || null,
     createdAt: row.created_at,
   };
+}
+
+// Batches serializePost + loadPollsForPosts for a full result set (feed
+// pages, search results, popular-flights) in one extra pair of queries
+// total, rather than one pair per post.
+async function serializePosts(rows, viewerId) {
+  const pollsByPost = await loadPollsForPosts(rows.map((r) => r.id), viewerId);
+  return rows.map((r) => serializePost(r, viewerId, pollsByPost.get(r.id)));
 }
 
 const FEED_QUERY = `
@@ -105,7 +177,7 @@ async function notifyNewPost(post, author) {
 //
 // `files` is the multer-style array (each with a `.filename`); pass an
 // empty array for callers that never attach images (e.g. the FSA bridge).
-async function createPost({ authorId, text, flight, files }) {
+async function createPost({ authorId, text, flight, files, poll }) {
   // SQLite has no gen_random_uuid(), so the id is generated here instead
   // of relying on a column default.
   const id = crypto.randomUUID();
@@ -129,10 +201,32 @@ async function createPost({ authorId, text, flight, files }) {
     );
   }
 
+  // poll is pre-validated (option count/length) by the POST "/" handler
+  // below — createPost() itself is also called by fsaFlightPost.js, which
+  // never passes one, so this stays a no-op in that path.
+  if (poll) {
+    await pool.query(`INSERT INTO polls (post_id) VALUES ($1)`, [id]);
+    for (let i = 0; i < poll.options.length; i++) {
+      await pool.query(
+        `INSERT INTO poll_options (id, post_id, text, position) VALUES ($1, $2, $3, $4)`,
+        [crypto.randomUUID(), id, poll.options[i], i]
+      );
+    }
+  }
+
   const full = await pool.query(`${FEED_QUERY} WHERE p.id = $2`, [authorId, id]);
-  const post = serializePost(full.rows[0], authorId);
+  const [post] = await serializePosts(full.rows, authorId);
   broadcast("post:new", post);
   notifyNewPost(post, { id: authorId, callsign: post.authorCallsign });
+  // Discord通知もfire-and-forget(awaitしない)。Bot未接続時やDiscord側の
+  // 障害時もnotifyDiscordNewPost内部でcatch済みなので、ここで例外が投稿
+  // 作成レスポンスに影響することはない。
+  notifyDiscordNewPost({
+    callsign: post.authorCallsign,
+    content: post.text || (post.flight ? "フライトログを投稿しました" : null),
+    postId: post.id,
+    imageUrls: post.imageUrls.map((p) => `${process.env.SITE_URL || ""}${p}`),
+  });
   return post;
 }
 
@@ -153,7 +247,7 @@ router.get("/", optionalAuth, async (req, res) => {
     const query = `${FEED_QUERY} ${where} ORDER BY p.created_at DESC LIMIT $${params.length}`;
 
     const result = await pool.query(query, params);
-    res.json({ posts: result.rows.map((r) => serializePost(r, req.user?.id)) });
+    res.json({ posts: await serializePosts(result.rows, req.user?.id) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "フィードの取得に失敗しました。" });
@@ -170,7 +264,7 @@ router.get("/popular-flights", optionalAuth, async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 5, 20);
     const query = `${FEED_QUERY} WHERE p.type = 'flight' ORDER BY like_count DESC, p.created_at DESC LIMIT $2`;
     const result = await pool.query(query, [req.user?.id || null, limit]);
-    res.json({ posts: result.rows.map((r) => serializePost(r, req.user?.id)) });
+    res.json({ posts: await serializePosts(result.rows, req.user?.id) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "人気のフライトの取得に失敗しました。" });
@@ -199,7 +293,7 @@ router.get("/search", optionalAuth, async (req, res) => {
 
     const query = `${FEED_QUERY} WHERE (${textCond} OR ${flightCond}) ORDER BY p.created_at DESC LIMIT $${params.length}`;
     const result = await pool.query(query, params);
-    res.json({ posts: result.rows.map((r) => serializePost(r, req.user?.id)) });
+    res.json({ posts: await serializePosts(result.rows, req.user?.id) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "検索に失敗しました。" });
@@ -217,7 +311,8 @@ router.get("/:id", optionalAuth, async (req, res) => {
   try {
     const result = await pool.query(`${FEED_QUERY} WHERE p.id = $2`, [req.user?.id || null, req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: "投稿が見つかりません。" });
-    res.json({ post: serializePost(result.rows[0], req.user?.id) });
+    const [post] = await serializePosts([result.rows[0]], req.user?.id);
+    res.json({ post });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "投稿の取得に失敗しました。" });
@@ -235,12 +330,39 @@ router.post("/", requireAuth, upload.array("images", upload.MAX_FILES_PER_POST),
     if (req.body.flight) {
       try { flight = JSON.parse(req.body.flight); } catch { flight = null; }
     }
-    const files = req.files || [];
-    if (!text?.trim() && !flight && !files.length) {
-      return res.status(400).json({ error: "本文・フライトログ・画像のいずれかが必要です。" });
+
+    // poll (投票機能): JSON string like { "options": ["A", "B", "C"] } —
+    // the poll's "question" is just the post's own `text`, same as how a
+    // flight-type post's caption and flight card are already independent
+    // fields. 2-6 non-empty options, each capped at POLL_MAX_OPTION_LEN,
+    // required to have an actual caption to ask the question with.
+    let poll = null;
+    if (req.body.poll) {
+      let parsed;
+      try { parsed = JSON.parse(req.body.poll); } catch { parsed = null; }
+      const options = Array.isArray(parsed?.options)
+        ? parsed.options.map((o) => String(o || "").trim()).filter(Boolean)
+        : [];
+      if (options.length) {
+        if (!text?.trim()) {
+          return res.status(400).json({ error: "投票には質問文（本文）が必要です。" });
+        }
+        if (options.length < POLL_MIN_OPTIONS || options.length > POLL_MAX_OPTIONS) {
+          return res.status(400).json({ error: `選択肢は${POLL_MIN_OPTIONS}〜${POLL_MAX_OPTIONS}個にしてください。` });
+        }
+        if (options.some((o) => o.length > POLL_MAX_OPTION_LEN)) {
+          return res.status(400).json({ error: `選択肢は${POLL_MAX_OPTION_LEN}文字以内にしてください。` });
+        }
+        poll = { options };
+      }
     }
 
-    const post = await createPost({ authorId: req.user.id, text, flight, files });
+    const files = req.files || [];
+    if (!text?.trim() && !flight && !files.length && !poll) {
+      return res.status(400).json({ error: "本文・フライトログ・画像・投票のいずれかが必要です。" });
+    }
+
+    const post = await createPost({ authorId: req.user.id, text, flight, files, poll });
     res.status(201).json({ post });
   } catch (err) {
     console.error(err);
@@ -271,6 +393,53 @@ router.post("/:id/like", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "いいねに失敗しました。" });
+  }
+});
+
+// POST /api/posts/:id/vote  { optionId }
+// One vote per user per poll: voting for a new option overwrites the
+// previous one (PRIMARY KEY (post_id, user_id) on poll_votes), voting for
+// the option already selected clears the vote (un-vote) — same toggle
+// pattern as /like above, just keyed by option rather than a bare boolean.
+router.post("/:id/vote", requireAuth, async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const optionId = String(req.body.optionId || "");
+
+    const optionResult = await pool.query(
+      "SELECT id FROM poll_options WHERE id = $1 AND post_id = $2",
+      [optionId, postId]
+    );
+    if (!optionResult.rows.length) {
+      return res.status(404).json({ error: "選択肢が見つかりません。" });
+    }
+
+    const existing = await pool.query(
+      "SELECT option_id FROM poll_votes WHERE post_id = $1 AND user_id = $2",
+      [postId, req.user.id]
+    );
+
+    if (existing.rows[0]?.option_id === optionId) {
+      await pool.query("DELETE FROM poll_votes WHERE post_id = $1 AND user_id = $2", [postId, req.user.id]);
+    } else if (existing.rows.length) {
+      await pool.query(
+        "UPDATE poll_votes SET option_id = $1, created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE post_id = $2 AND user_id = $3",
+        [optionId, postId, req.user.id]
+      );
+    } else {
+      await pool.query(
+        "INSERT INTO poll_votes (post_id, option_id, user_id) VALUES ($1, $2, $3)",
+        [postId, optionId, req.user.id]
+      );
+    }
+
+    const pollsByPost = await loadPollsForPosts([postId], req.user.id);
+    const poll = pollsByPost.get(postId) || { totalVotes: 0, myVoteOptionId: null, options: [] };
+    broadcast("poll:vote", { postId, poll: { ...poll, myVoteOptionId: undefined } });
+    res.json({ poll });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "投票に失敗しました。" });
   }
 });
 

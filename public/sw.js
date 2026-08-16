@@ -4,7 +4,14 @@
 // left completely alone: only the static shell listed in SHELL_ASSETS is
 // ever cached, so normal network behavior for everything else is
 // untouched.
-const CACHE_VERSION = "aerosocial-shell-v1";
+//
+// IMPORTANT: bump CACHE_VERSION whenever this file's *caching behavior*
+// itself changes (rare) — it does NOT need bumping for ordinary app.js /
+// styles.css deploys, since the network-first strategy below already
+// picks those up on the very next request without relying on this
+// string at all. It only exists so activate() can drop a genuinely
+// obsolete cache format if this file's own logic changes shape.
+const CACHE_VERSION = "aerosocial-shell-v2";
 const SHELL_ASSETS = [
   "/",
   "/app.js",
@@ -37,10 +44,24 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Cache-first for the static shell only (same-origin GET requests for the
-// exact assets above). Every other request — /api/*, WebSocket upgrades,
-// user images, third-party fonts/tiles — falls straight through to the
-// network exactly as if this handler didn't exist.
+// Network-first for the static shell (same-origin GET requests for the
+// exact assets above), falling back to the cached copy only when the
+// network request itself fails (actually offline). Every other request —
+// /api/*, WebSocket upgrades, user images, third-party fonts/tiles —
+// falls straight through to the network exactly as if this handler
+// didn't exist.
+//
+// This used to be cache-first (serve the cached copy immediately, only
+// falling back to network for a cache miss), which is why a server-side
+// deploy of app.js/styles.css never reached anyone who already had the
+// PWA installed: once a shell asset was cached, it stayed cached
+// indefinitely regardless of what the server actually had, and the only
+// way to evict it was to change CACHE_VERSION (an easy thing to forget)
+// or manually clear the browser's data — a "hard refresh" gesture mobile
+// browsers don't really offer. Network-first means every load simply
+// gets whatever the server currently has, same as if this file weren't
+// caching anything at all — the cache here now purely exists as an
+// offline fallback, not as the normal path.
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -51,15 +72,13 @@ self.addEventListener("fetch", (event) => {
   if (!isShellAsset) return;
 
   event.respondWith(
-    caches.match(request).then(
-      (cached) =>
-        cached ||
-        fetch(request).then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-          return response;
-        })
-    )
+    fetch(request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+        return response;
+      })
+      .catch(() => caches.match(request))
   );
 });
 

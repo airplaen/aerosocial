@@ -8,6 +8,22 @@ const push = require("../lib/push");
 
 const router = express.Router();
 
+// favorite_anime列にはJSON配列文字列("[\"タイトル1\",\"タイトル2\"]")を
+// 保存している。複数アニメ対応前は単一の生文字列がそのまま入っていた
+// ことがあるため、JSON.parseが失敗した場合はその文字列を1件だけの
+// 配列として扱う(後方互換)。
+function parseAnimeList(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((t) => typeof t === "string" && t.trim()).map((t) => t.trim());
+    }
+  } catch { /* 移行前の単一文字列データとして扱う */ }
+  const trimmed = String(raw).trim();
+  return trimmed ? [trimmed] : [];
+}
+
 function publicUser(row) {
   return {
     id: row.id,
@@ -15,6 +31,7 @@ function publicUser(row) {
     name: row.name,
     homeBase: row.home_base,
     bio: row.bio,
+    favoriteAnimeList: parseAnimeList(row.favorite_anime),
     hue: row.hue,
     avatarUrl: row.avatar_path ? `/uploads/${row.avatar_path}` : null,
     joined: row.created_at,
@@ -31,10 +48,10 @@ router.get("/me", requireAuth, async (req, res) => {
 // PATCH /api/users/me
 // Accepts either JSON or multipart/form-data (multipart is required to
 // include a new avatar image under the "avatar" field).
-// Fields: name?, homeBase?, bio?, hue?, currentPassword?, newPassword?, avatar? (file)
+// Fields: name?, homeBase?, bio?, favoriteAnimeList? (JSON array string), hue?, currentPassword?, newPassword?, avatar? (file)
 router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
   try {
-    const { name, homeBase, bio, hue, currentPassword, newPassword } = req.body;
+    const { name, homeBase, bio, favoriteAnimeList, hue, currentPassword, newPassword } = req.body;
 
     const existing = await pool.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
     const user = existing.rows[0];
@@ -59,6 +76,28 @@ router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
     if (bio !== undefined) {
       fields.push(`bio = $${idx++}`);
       params.push(String(bio || "").slice(0, 280));
+    }
+
+    if (favoriteAnimeList !== undefined) {
+      // クライアントはJSON配列を文字列化して1つのフォームフィールドとして
+      // 送ってくる(multipart/form-dataは配列フィールドをネイティブには
+      // 扱えないため)。
+      let list;
+      try {
+        list = JSON.parse(favoriteAnimeList);
+      } catch {
+        return res.status(400).json({ error: "favoriteAnimeListの形式が不正です。" });
+      }
+      if (!Array.isArray(list)) {
+        return res.status(400).json({ error: "favoriteAnimeListは配列で指定してください。" });
+      }
+      const cleaned = list
+        .map((t) => String(t || "").trim())
+        .filter(Boolean)
+        .slice(0, 10) // 上限10件
+        .map((t) => t.slice(0, 100));
+      fields.push(`favorite_anime = $${idx++}`);
+      params.push(JSON.stringify(cleaned));
     }
 
     if (hue !== undefined) {

@@ -14,6 +14,13 @@
      every inline `style="...var(--accent-2)..."` etc. built in app.js
      keeps resolving exactly as before). */
   --accent-violet: #8b7bff;
+  /* News panel accent — deliberately warm (amber/orange) so the breaking-
+     news flash (news-flash-popup below) reads as "urgent update" without
+     being mistaken for the earthquake warning (--danger, red) it's
+     modeled after. */
+  --accent-gold: #ffb454;
+  --accent-gold-2: #ff8a5c;
+  --gradient-gold: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-gold-2) 100%);
   --gradient-accent: linear-gradient(135deg, var(--accent) 0%, var(--accent-violet) 100%);
   --gradient-accent-2: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 30px -14px rgba(0, 0, 0, 0.65);
@@ -325,6 +332,15 @@ input, textarea {
 
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 
+/* Below 900px the topbar can't fit its full button row (マイ投稿 / イベント /
+   設定 / 管理者パネル / avatar) without wrapping and breaking the layout, so
+   collapse it down to just the logo. Every action it held is reachable
+   instead from the "その他" tab in .mobile-tabbar (see setupMobileTabbar). */
+@media (max-width: 899.98px) {
+  .topbar-actions { display: none; }
+  .topbar { justify-content: flex-start; }
+}
+
 .avatar {
   width: 34px;
   height: 34px;
@@ -434,6 +450,38 @@ input, textarea {
   border-color: var(--accent);
   box-shadow: var(--ring);
 }
+
+/* ---------- Multi-anime editor (profile edit modal) ---------- */
+.anime-editor { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.anime-editor-row { display: flex; gap: 8px; align-items: center; }
+.anime-editor-row input {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--text);
+  font-size: 14px;
+}
+.anime-editor-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.anime-editor-remove {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.anime-editor-remove:hover { color: #ff8a5c; border-color: #ff8a5c; }
+
 
 .btn {
   padding: 10px 16px;
@@ -572,6 +620,130 @@ input, textarea {
   transition: background 0.15s, color 0.15s, transform 0.1s;
 }
 .icon-btn:hover { background: var(--panel-2); color: var(--accent); transform: translateY(-1px); }
+
+/* ---------- Poll builder (composer) ---------- */
+.poll-builder {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.poll-builder-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.poll-builder-head .material-symbols-rounded { font-size: 18px; color: var(--accent); }
+.poll-builder-head .poll-remove-btn { margin-left: auto; }
+.poll-builder-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.poll-builder-input {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 14px;
+}
+.poll-builder-input:focus { outline: none; border-color: var(--accent); }
+.poll-remove-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 107, 122, 0.12);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1;
+  transition: background 0.15s;
+}
+.poll-remove-btn:hover { background: rgba(255, 107, 122, 0.24); }
+.poll-builder-add {
+  width: 100%;
+  padding: 8px;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+/* ---------- Poll display (feed card) ---------- */
+.poll-card {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.poll-option-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 14px;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.poll-option-btn:hover {
+  border-color: var(--accent);
+  background: rgba(77, 163, 255, 0.08);
+  transform: translateY(-1px);
+}
+.poll-option-result {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  overflow: hidden;
+  font-size: 14px;
+  text-align: left;
+}
+.poll-option-result.poll-option-mine { border-color: var(--accent); }
+.poll-option-fill {
+  position: absolute;
+  inset: 0;
+  right: auto;
+  background: linear-gradient(90deg, rgba(77, 163, 255, 0.28), rgba(77, 163, 255, 0.14));
+  transition: width 0.3s ease;
+}
+.poll-option-result.poll-option-mine .poll-option-fill {
+  background: linear-gradient(90deg, rgba(126, 231, 199, 0.32), rgba(126, 231, 199, 0.16));
+}
+.poll-option-label {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.poll-check { font-size: 15px; color: var(--accent-2); flex: none; }
+.poll-option-pct {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  margin-left: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.poll-meta { font-size: 12px; color: var(--text-dim); }
 
 /* ---------- Feed search ---------- */
 .feed-search {
@@ -1119,6 +1291,12 @@ input, textarea {
 .sidebar .popular-flights {
   margin-bottom: 0;
 }
+/* ニュースパネルは人気のフライトパネルの直下に表示する。空の場合
+   (loadNews()完了前や取得0件時)は#news-panel-slotが空文字のままなので
+   余白は発生しない。 */
+#news-panel-slot:not(:empty) {
+  margin-top: 18px;
+}
 .popular-flight-item:hover { border-color: var(--accent); }
 .popular-flight-route {
   display: flex;
@@ -1295,6 +1473,173 @@ input, textarea {
   padding: 7px 0;
 }
 
+/* ---------- 天気予報セクション (地震情報パネル下部) ---------- */
+.weather-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.weather-section-title {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  margin-bottom: 10px;
+}
+/* .feed-search / .feed-search-icon / .feed-search-clear (styles.css 上部)
+   の見た目をそのまま流用し、検索窓の外観をフィード検索と揃えている。 */
+.weather-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.weather-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.weather-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13.5px;
+}
+.weather-search input:focus { outline: none; }
+.weather-error { margin-bottom: 10px; }
+.weather-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.weather-candidate-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.weather-candidate-chip:hover {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+.weather-result-location {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.weather-day-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.weather-day-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px;
+  text-align: center;
+}
+.weather-day-empty { color: var(--text-dim); font-size: 12px; padding: 18px 10px; }
+.weather-day-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.weather-day-icon { width: 44px; height: 44px; display: block; margin: 0 auto; }
+.weather-day-temp { font-size: 15px; }
+.weather-day-temp-min { color: var(--text-dim); font-size: 12.5px; margin-left: 2px; }
+.weather-day-desc {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.weather-day-pop {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 4px;
+}
+.weather-detail-btn {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 7px 0;
+}
+
+/* ---------- 天気予報 詳細モーダル ---------- */
+.weather-detail-modal { max-width: 460px; }
+.weather-detail-tag {
+  display: inline-block;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.weather-detail-location { font-size: 15px; margin-bottom: 10px; }
+.weather-detail-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.weather-detail-current-icon { width: 56px; height: 56px; }
+.weather-detail-current-temp { font-size: 30px; font-weight: 800; }
+.weather-detail-current-desc { color: var(--text-dim); font-size: 13px; }
+.weather-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  font-size: 12.5px;
+  margin-bottom: 4px;
+}
+.weather-detail-row {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed var(--border);
+  padding: 6px 0;
+}
+.weather-detail-label { color: var(--text-dim); }
+.weather-detail-value { font-weight: 600; }
+.weather-hourly-title {
+  font-weight: 800;
+  font-size: 13px;
+  margin: 14px 0 8px;
+}
+.weather-hourly-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+.weather-hour-row {
+  display: grid;
+  grid-template-columns: 74px 26px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.weather-hour-row:last-child { border-bottom: none; }
+.weather-hour-time { color: var(--text-dim); }
+.weather-hour-icon { width: 26px; height: 26px; }
+.weather-hour-desc { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.weather-hour-temp { font-weight: 700; }
+.weather-hour-pop { color: var(--accent); font-size: 11px; }
+
 /* ---------- EEW slide-down popup ---------- */
 /* Page-wide banner for code-556 (緊急地震速報) messages — sits above
    everything else and slides down from off-screen. Kept in the DOM
@@ -1363,6 +1708,283 @@ input, textarea {
     margin-top: 8px;
   }
 }
+
+
+/* ---------- News panel (日本のニュース, 人気のフライトパネル下部) ---------- */
+.news-panel {
+  background: linear-gradient(160deg, rgba(255, 138, 92, 0.08), transparent 45%), var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow-card);
+}
+.news-panel-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 10px;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.news-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* パネルが記事数に比例して際限なく縦に伸び、ページ全体を押し下げて
+     しまわないよう、リスト自体を固定高でスクロールさせる。 */
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-gold) transparent;
+}
+.news-panel-list::-webkit-scrollbar {
+  width: 6px;
+}
+.news-panel-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.news-panel-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 184, 92, 0.45);
+  border-radius: 6px;
+}
+.news-panel-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 184, 92, 0.7);
+}
+.news-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.news-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-gold);
+  box-shadow: 0 10px 22px -12px rgba(255, 138, 92, 0.35);
+}
+.news-item-breaking {
+  border-color: rgba(255, 138, 92, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 138, 92, 0.15) inset;
+}
+.news-item-thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--panel);
+}
+.news-item-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: linear-gradient(
+    160deg,
+    hsla(var(--news-hue, 28), 90%, 68%, 0.28),
+    hsla(calc(var(--news-hue, 28) + 30), 85%, 55%, 0.12)
+  );
+}
+.news-panel-credit {
+  margin-top: 10px;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  opacity: 0.7;
+  letter-spacing: 0.01em;
+}
+.news-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.news-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.news-item-source {
+  color: var(--accent-gold);
+  font-weight: 600;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.news-badge-breaking {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #1a0f06;
+  background: var(--gradient-gold);
+  border-radius: 5px;
+  padding: 2px 6px;
+  box-shadow: 0 0 10px rgba(255, 138, 92, 0.5);
+  animation: news-badge-pulse 1.8s ease-in-out infinite;
+}
+@keyframes news-badge-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.04); }
+}
+
+/* ---------- News flash popup (速報 — 緊急地震速報のeew-popupと同じ演出) ---------- */
+/* .eew-popup と全く同じ「上端固定 + スライドイン + オーバーシュート」の
+   アニメーション構造をそのまま再利用しつつ、色調だけアンバー系に変えて
+   地震警報と混同しないようにしてある。クリックすると該当記事の詳細
+   ポップアップを開く(showNewsFlashPopup内のイベントリスナー参照)。 */
+.news-flash-popup {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  width: min(480px, calc(100% - 24px));
+  margin-top: 10px;
+  z-index: 500;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: linear-gradient(160deg, rgba(255, 138, 92, 0.24), rgba(255, 180, 84, 0.1)), var(--panel);
+  border: 1px solid var(--accent-gold-2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 24px 60px -20px rgba(255, 138, 92, 0.35), var(--shadow-pop);
+  transform: translateX(-50%) translateY(-130%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.32, 1.4), opacity 0.25s ease;
+}
+.news-flash-popup.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.news-flash-inner {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.news-flash-title {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--accent-gold);
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+.news-flash-headline {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-flash-source {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+@media (max-width: 640px) {
+  .news-flash-popup {
+    width: calc(100% - 20px);
+    margin-top: 8px;
+  }
+}
+
+/* ---------- News detail modal (ニュース記事クリック時のポップアップ) ---------- */
+.news-detail-modal {
+  max-width: 480px;
+  padding: 0;
+  overflow: hidden;
+}
+.news-detail-image {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
+.news-detail-modal .modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  float: none;
+  background: rgba(3, 5, 10, 0.55);
+  backdrop-filter: blur(3px);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.news-detail-body {
+  position: relative;
+  padding: 18px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.news-detail-category {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.3);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.news-detail-title {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.news-detail-meta {
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+.news-detail-summary {
+  margin: 4px 0 6px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.news-detail-link {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: var(--gradient-gold);
+  color: #1a0f06;
+  border: none;
+}
+.news-detail-link:hover { filter: brightness(1.06); }
 
 
 /* ---------- Flight detail popup ---------- */
@@ -1661,6 +2283,30 @@ input, textarea {
   gap: 16px;
 }
 .profile-main-col { min-width: 0; }
+.profile-side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+.profile-anime-sidebar:empty { display: none; }
+.profile-anime-sidebar-title {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.profile-anime-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.profile-anime-sidebar-list .anime-card { margin-bottom: 0; }
 .profile-follow-panel {
   display: none;
   width: 100%;
@@ -1678,16 +2324,115 @@ input, textarea {
     gap: 24px;
   }
   .profile-main-col { flex: 1; }
-  .profile-follow-panel {
+  .profile-side-col {
     width: 260px;
     flex-shrink: 0;
+  }
+  .profile-follow-panel {
     border-top: none;
     border-left: 1px solid var(--border);
-    padding-top: 30px;
+    padding-top: 0;
     padding-left: 20px;
     max-height: 70vh;
   }
 }
+
+/* ---------- Mobile "その他" menu sheet (topbar actions moved here) ---------- */
+.sheet-menu-list { display: flex; flex-direction: column; gap: 8px; }
+.sheet-menu-list .btn { display: block; width: 100%; text-align: left; }
+
+/* ---------- Favorite-anime card (profile view) ---------- */
+/* 画像がある場合はカード全体の背景に敷き、下から暗くなるグラデーションで
+   文字を読みやすくする「オシャレ」なスタイル(.has-image)。画像が無い/
+   まだ読み込み中の場合は従来通りのシンプルな横並びレイアウトにフォール
+   バックする。 */
+.anime-card {
+  position: relative;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+.anime-card:not(.anime-card--has-image) {
+  display: flex;
+  gap: 14px;
+  padding: 12px;
+}
+.anime-card--has-image {
+  min-height: 200px;
+  display: flex;
+  align-items: flex-end;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.anime-card--has-image:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
+.anime-card-bg-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+.anime-card-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(to top, rgba(5, 7, 13, 0.95) 0%, rgba(5, 7, 13, 0.62) 42%, rgba(5, 7, 13, 0.05) 78%);
+  pointer-events: none;
+}
+.anime-card-body { position: relative; min-width: 0; flex: 1; }
+.anime-card--has-image .anime-card-body { z-index: 2; padding: 16px; }
+.anime-card-label {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+.anime-card--has-image .anime-card-label {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #fff;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.anime-card-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.anime-card--has-image .anime-card-title {
+  font-size: 17px;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+}
+.anime-card-title a { color: var(--text); text-decoration: none; }
+.anime-card-title a:hover { color: var(--accent-2); }
+.anime-card--has-image .anime-card-title a { color: #fff; }
+.anime-card--has-image .anime-card-title a:hover { color: var(--accent-2); }
+.anime-card-synopsis {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.anime-card--has-image .anime-card-synopsis {
+  color: rgba(255, 255, 255, 0.88);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  -webkit-line-clamp: 3;
+}
+.anime-card-loading { font-size: 12.5px; color: var(--text-dim); }
 
 .avatar-picker {
   display: flex;
@@ -1864,3 +2609,78 @@ input, textarea {
   .admin-list-row { flex-direction: column; align-items: stretch; }
   .admin-list-actions { justify-content: flex-start; }
 }
+
+/* ---------------------------------------------------------------- events (イベント機能) */
+.events-modal { max-width: 480px; text-align: left; }
+
+.event-type-badge {
+  display: inline-block;
+  background: rgba(245, 158, 11, 0.14);
+  color: #f5ae2e;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.event-create-form .field:last-of-type { margin-bottom: 8px; }
+
+.event-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.event-card:hover { border-color: var(--accent); }
+
+.event-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.event-card-when { font-size: 12px; color: var(--text-dim); }
+
+.event-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.event-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.event-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.event-card-creator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.event-participant-list { max-height: 220px; overflow-y: auto; }
+.event-participant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.event-participant-row:last-child { border-bottom: none; }

@@ -13,12 +13,18 @@ const authRoutes = require("./routes/auth");
 const postRoutes = require("./routes/posts");
 const userRoutes = require("./routes/users");
 const simbriefRoutes = require("./routes/simbrief");
+const weatherRoutes = require("./routes/weather");
 const youtubeRoutes = require("./routes/youtube");
 const notificationRoutes = require("./routes/notifications");
 const settingsRoutes = require("./routes/settings");
 const adminRoutes = require("./routes/admin");
 const adsRoutes = require("./routes/ads");
+const eventRoutes = require("./routes/events");
+const animeImageRoutes = require("./routes/animeImage");
+const newsRoutes = require("./routes/news");
 const { initWebSocket } = require("./ws");
+const { initDiscordBot } = require("./services/discordNotify");
+const { startNewsFeed } = require("./services/newsFeed");
 
 const app = express();
 
@@ -154,6 +160,11 @@ app.use("/api/users", userRoutes);
 const simbriefLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
 app.use("/api/simbrief", simbriefLimiter, simbriefRoutes);
 
+// OpenWeatherMapも外部APIを毎リクエスト叩くため、SimBriefと同水準の
+// レート制限をかける(地震パネル下部の検索窓からの呼び出しのみ)。
+const weatherLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60 });
+app.use("/api/weather", weatherLimiter, weatherRoutes);
+
 // One YouTube card can appear per post, and the frontend caches results per
 // video id (see youtubeMetaCache in app.js), so this stays far lighter than
 // the SimBrief limiter — the generous cap is mainly a guard against a feed
@@ -162,6 +173,20 @@ const youtubeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 120 });
 app.use("/api/youtube", youtubeLimiter, youtubeRoutes);
 
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/events", eventRoutes);
+
+// アニメの紹介画像(Wikipediaに無い場合のフォールバック)をJikan API
+// (MyAnimeList)から取ってくるプロキシ。Weather/YouTubeと同じく外部APIを
+// 毎リクエスト叩くため、同水準のレート制限をかける(Jikan自体も3req/秒,
+// 60req/分の制限があるので、それより厳しくならない範囲で設定)。
+const animeImageLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60 });
+app.use("/api/anime-image", animeImageLimiter, animeImageRoutes);
+
+// ニュースパネル(人気のフライトパネル下部)。取得自体はservices/newsFeed.js
+// が裏で定期ポーリングしてDBに貯めているだけなので、ここはDB読み出しのみ
+// ——外部APIを毎リクエスト叩くweather/youtube/anime-imageほど厳しい制限は
+// 不要。未ログインの訪問者にも見せるため認証なし(quakeパネルと同方針)。
+app.use("/api/news", newsRoutes);
 
 // FSA自動投稿ON/OFF設定など、ユーザーごとの設定値を扱うAPI。
 // routes/settings.js の GET/PATCH /fsa-auto-post がここにぶら下がる。
@@ -233,6 +258,14 @@ app.use((err, _req, res, _next) => {
 // using app.listen() directly.
 const server = http.createServer(app);
 initWebSocket(server, allowedOrigins);
+// Discord Bot通知。トークン未設定の場合はモジュール内で警告を出して
+// サイレントに無効化されるだけなので、他の環境変数と同様ここで無条件に
+// 呼んでおけばよい。
+initDiscordBot();
+// ニュースパネルのポーリング開始。initWebSocket() より後に呼ぶ必要がある
+// (newsFeed.js は新着記事を検知するたびbroadcast()を呼ぶため)。
+// APITUBE_API_KEY未設定の場合はモジュール内で警告を出して無効化される。
+startNewsFeed();
 
 const port = process.env.PORT || 3000;
 server.listen(port, () => {
