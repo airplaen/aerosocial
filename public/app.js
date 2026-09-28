@@ -2,8 +2,83 @@
   "use strict";
 
   const root = document.getElementById("root");
+
+  // Esri(ArcGIS)の無料ベースマップ。いずれもAPIキー不要。
+  // 注意: このタイルは {z}/{y}/{x} の順（OSM系タイルと x/y が逆）。
+  const BASEMAP_STYLES = [
+    {
+      id: "street",
+      label: "地図",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      attribution:
+        "Tiles &copy; Esri &mdash; Source: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), Esri Korea, Esri (Thailand), NGCC, (c) OpenStreetMap contributors, and the GIS User Community",
+    },
+    {
+      id: "topo",
+      label: "地形図",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+      attribution:
+        "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS, (c) OpenStreetMap contributors, and the GIS User Community",
+    },
+    {
+      id: "satellite",
+      label: "衛星写真",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      attribution:
+        "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    },
+  ];
+  const TILE_URL = BASEMAP_STYLES[0].url;
+  const TILE_SUBDOMAINS = "";
+  const TILE_MAX_ZOOM = 19;
+  const TILE_ATTRIBUTION = BASEMAP_STYLES[0].attribution;
+
   const TOKEN_KEY = "aerosocial_token";
   const SIMBRIEF_USERNAME_KEY = "aerosocial_simbrief_username";
+  const WARNING_AREA_KEY = "aerosocial_warning_area";
+  const THEME_KEY = "aerosocial_theme";
+  // 運営メッセージの「未読」バッジ用。既読管理はサーバーに持たせていない
+  // (announcementsテーブルは送信履歴のみ)ので、最後に開いた時点の最新
+  // メッセージIDをブラウザ側に覚えておくだけの簡易な仕組み。ユーザーIDを
+  // 混ぜているのは、同じブラウザで複数アカウントを使い分けた場合に
+  // 別々のアカウントの既読状態を取り違えないようにするため。
+  const MESSAGES_LAST_SEEN_KEY_PREFIX = "aerosocial_msgs_last_seen_";
+
+  // ---------------------------------------------------------------- theme (light/dark)
+  // The actual light/dark palette lives entirely in CSS custom properties
+  // (see :root[data-theme="light"] in styles.css) — this just flips the
+  // `data-theme` attribute on <html>, persists the choice, and keeps the
+  // toggle icon(s) / PWA theme-color meta tag in sync. The attribute is
+  // already set once, synchronously, by the inline script in index.html
+  // (before first paint, so switching themes never flashes the other
+  // theme first) — this only needs to react to it from here on.
+  function getTheme() {
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  }
+
+  function syncThemeToggleIcons() {
+    const nextIcon = getTheme() === "light" ? "dark_mode" : "light_mode";
+    document.querySelectorAll(".theme-toggle-icon").forEach((el) => { el.textContent = nextIcon; });
+    const label = document.getElementById("menu-theme-toggle-label");
+    if (label) label.textContent = getTheme() === "light" ? "ダークモードに切替" : "ライトモードに切替";
+  }
+
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* private mode etc. — theme just won't persist */ }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme === "light" ? "#f4f5fa" : "#05070d");
+    syncThemeToggleIcons();
+  }
+
+  function toggleTheme() {
+    setTheme(getTheme() === "light" ? "dark" : "light");
+  }
+
+  // Sync the theme-color meta tag with whatever the bootstrap script in
+  // index.html already picked (saved preference, else OS setting).
+  setTheme(getTheme());
+
 
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || null,
@@ -81,6 +156,9 @@
     // Most recent 緊急地震速報（警報）(code 556 — a forecast issued before
     // shaking arrives) received, real or sandbox-sourced.
     latestEEW: null,
+    // ---- ランキング一覧（地震情報パネル下部のサイドバー） ----
+    // 今月の飛行距離トップ5の簡易リスト（フル版はopenLeaderboardModal）。
+    sidebarLeaderboard: [],
     // ---- OpenWeatherMap 天気検索 (地震情報パネル下部の検索窓) ----
     // 検索欄に入力中/確定したテキスト。パネルはquake系イベントのたびに
     // 再描画されるため、値をstateに保持して再描画後も入力内容が失われな
@@ -99,11 +177,28 @@
       // 詳細モーダル用の3時間ごとの予報を含む)
       data: null,
     },
+    // ---- 気象庁 気象警報・注意報 (地震情報パネル下部) ----
+    warningAlert: {
+      areas: null, // GET /api/weather/warning-areas のプルダウン選択肢
+      areasLoading: false,
+      // 前回選んだ地域をlocalStorageから復元(未選択ならnull)。
+      areaCode: localStorage.getItem(WARNING_AREA_KEY) || "",
+      loading: false,
+      error: "",
+      data: null, // GET /api/weather/warnings のレスポンス
+    },
     // Admin-configured ad embed (AdSense/AdMax/etc. snippet), loaded from
     // GET /api/ads on boot. `code` is only ever non-empty when `enabled`
     // is true (see routes/ads.js) and `frequency` is "insert after every
     // N posts" in the feed.
     adConfig: { enabled: false, code: "", frequency: 5 },
+    // ---- 運営からのメッセージ(お知らせ)を見る「メッセージ」タブ ----
+    // 画面上部に一瞬だけ出るバナー(showAnnouncementBar)とは別に、DM風の
+    // 履歴として遡れるようにするための一覧。GET /api/notifications/
+    // announcementsで初回ロードし、以後はWS(announcement:new)で先頭
+    // (=一番新しい方、chatとしては末尾)に追記していく。
+    messages: [],
+    messagesLoaded: false,
   };
 
   // Page size for the main feed. Kept as a named constant since it's also
@@ -124,6 +219,11 @@
   const POLL_MIN_OPTIONS = 2;
   const POLL_MAX_OPTIONS = 6;
   const POLL_MAX_OPTION_LEN = 60;
+  // メモ(ニーボード)機能。src/routes/memos.jsのTITLE_MAX_LEN/TEXT_MAX_LENと
+  // 揃えている(サーバー側も必ず再検証するが、フロントで先に弾ければ
+  // 余計な往復を減らせる)。
+  const MEMO_TITLE_MAX = 80;
+  const MEMO_TEXT_MAX = 20000;
 
   // ---------------------------------------------------------------- utils
   function escapeHtml(str) {
@@ -153,7 +253,11 @@
       const core = trailing ? match.slice(0, -trailing[0].length) : match;
       const rest = trailing ? trailing[0] : "";
       const href = core.startsWith("http") ? core : `https://${core}`;
-      return `<a href="${href}" target="_blank" rel="noopener noreferrer">${core}</a>${rest}`;
+      // class="auto-link": one shared style (see styles.css) for every link
+      // linkify() produces, wherever it ends up (post text, comments, bio,
+      // event descriptions, ...) instead of depending on each container to
+      // remember to style its own <a> tags.
+      return `<a class="auto-link" href="${href}" target="_blank" rel="noopener noreferrer">${core}</a>${rest}`;
     });
   }
 
@@ -687,6 +791,7 @@
       }
     }
     if (state.user) await checkAdminStatus();
+    if (state.user) syncWarningAreaSubscription();
     state.booted = true;
     render();
     if (state.user) {
@@ -695,6 +800,7 @@
       loadPopularFlights();
       openSharedPostFromUrl();
       loadNotificationSettings();
+      loadMessages();
     }
     connectWS();
     connectQuakeWS();
@@ -702,6 +808,10 @@
     // quakeパネルと同じく未ログインでも見せるので、ログイン分岐の外側で
     // 呼ぶ。以降の新着はWS(news:new)でリアルタイムに追加される。
     loadNews();
+    // ランキングパネルも同様に未ログインでも見せる(quake/newsパネルと
+    // 同方針)。フライト実績の変動はイベントほど頻繁でもリアルタイム性が
+    // 重要でもないので、WS購読はせず起動時に一度だけ取得する。
+    loadSidebarLeaderboard();
   }
 
   // If the page was opened via a shared post link (?post=<id>), open that
@@ -827,12 +937,61 @@
   // 目的の2回だけで十分。
   async function loadNews() {
     try {
-      const { items } = await api("/api/news?limit=30");
+      const { items } = await api("/api/news?limit=60");
       state.news = items;
       renderNewsPanel();
+      renderNewsHubTabs();
+      renderNewsHubBody();
     } catch {
       // Non-critical panel — fail silently, same reasoning as popular flights.
     }
+  }
+
+  // ---------------------------------------------------------------- 運営からのメッセージ(「メッセージ」タブ)
+  // GET /api/notifications/announcements の履歴を取得し、chatの表示順
+  // (古い→新しい)に並べ替えて保持する。バナー(showAnnouncementBar)は
+  // 別枠で既存のまま動き続け、こちらはその履歴を後から遡れるようにする。
+  async function loadMessages() {
+    try {
+      const { announcements } = await api("/api/notifications/announcements?limit=100");
+      state.messages = announcements.slice().reverse();
+      state.messagesLoaded = true;
+      renderMessagesBadge();
+      renderMessagesList();
+    } catch {
+      // お知らせが無い/失敗してもアプリ全体は困らないので静かに諦める。
+    }
+  }
+
+  function messagesLastSeenKey() {
+    return state.user ? `${MESSAGES_LAST_SEEN_KEY_PREFIX}${state.user.id}` : null;
+  }
+
+  function hasUnreadMessages() {
+    if (!state.messages.length) return false;
+    const key = messagesLastSeenKey();
+    if (!key) return false;
+    const lastSeenId = localStorage.getItem(key);
+    const newestId = state.messages[state.messages.length - 1].id;
+    return lastSeenId !== newestId;
+  }
+
+  function markMessagesRead() {
+    const key = messagesLastSeenKey();
+    if (!key || !state.messages.length) return;
+    localStorage.setItem(key, state.messages[state.messages.length - 1].id);
+    renderMessagesBadge();
+  }
+
+  // トップバー/モバイルメニューの「メッセージ」ボタンに未読バッジを
+  // 反映する。両方存在するとは限らない(トップバーは900px未満で非表示、
+  // モバイルメニューはシートを開いている時だけDOMにある)ので、それぞれ
+  // 要素があるかを見てから触る。
+  function renderMessagesBadge() {
+    const unread = hasUnreadMessages();
+    document.querySelectorAll(".messages-btn").forEach((el) => {
+      el.classList.toggle("has-badge", unread);
+    });
   }
 
   async function login(callsign, password) {
@@ -1187,9 +1346,34 @@
         // this is a server-side poll-then-broadcast instead of the
         // browser talking to APITube directly.
         if (!state.news.some((n) => n.id === msg.payload.id)) {
-          state.news = [msg.payload, ...state.news].slice(0, 60);
+          state.news = [msg.payload, ...state.news].slice(0, 90);
           renderNewsPanel();
+          renderNewsHubTabs();
+          renderNewsHubBody();
           if (msg.payload.isBreaking) showNewsFlashPopup(msg.payload);
+        }
+        break;
+      }
+      // event:created/updated/deleted/participants: これらは元々
+      // サイドバーのイベント一覧(WS更新のたびに再取得)を最新に保つ
+      // ためだけの購読だった。そのサイドバーはランキング表示に置き換えた
+      // (イベント作成/参加自体はopenEventsModal側でAPIから都度取得する
+      // だけで、開いている間のリアルタイム更新はもともと無い)ため、
+      // 対応するcaseは不要になり削除した。
+      case "announcement:new": {
+        showAnnouncementBar(msg.payload);
+        // 「メッセージ」タブの履歴にも同じものを反映する。バナーを閉じても
+        // 後から見返せるのがこのタブの役目なので、ここでも必ず追記する。
+        if (!state.messages.some((m) => m.id === msg.payload.id)) {
+          state.messages = [...state.messages, msg.payload];
+          if (messagesModalEl) {
+            // 開いている間に届いた分は「見た」扱いにして、既読位置も
+            // 一緒に進める(未読バッジが閉じた瞬間に点灯し直すのを防ぐ)。
+            renderMessagesList();
+            markMessagesRead();
+          } else {
+            renderMessagesBadge();
+          }
         }
         break;
       }
@@ -1207,6 +1391,9 @@
   const QUAKE_WS_URL = "wss://api.p2pquake.net/v2/ws";
   let quakeWs = null;
   let quakeWsRetryTimer = null;
+  // モバイルの地震情報タブに未確認バッジを出すためのフラグ。
+  // markQuakeUnseen() / updateQuakeTabBadge() 参照。
+  let quakeUnseen = false;
   let quakeMapInstance = null;
   // Debounce timer for the weather search box mounted at the bottom of the
   // quake panel (see wireWeatherSection) — same 500ms-ish convention as
@@ -1289,6 +1476,22 @@
     return max;
   }
 
+  // モバイルのボトムタブでは地震情報パネルが常時見えているわけではない
+  // ので（開くにはタップが要る）、eew-popup（数秒で消える）だけだと
+  // タイミングを逃した人が新着に気づけない。タブのアイコンに小さな
+  // バッジを立てて、シートを開くまで消えないようにする — 詳細は
+  // updateQuakeTabBadge() 参照。
+  function markQuakeUnseen() {
+    if (mobilePanelKind === "quake") return; // 今まさに見ている最中
+    quakeUnseen = true;
+    updateQuakeTabBadge();
+  }
+
+  function updateQuakeTabBadge() {
+    const tab = document.getElementById("tab-quake");
+    if (tab) tab.classList.toggle("has-badge", quakeUnseen);
+  }
+
   function handleQuakeMessage(msg, isTest) {
     if (!msg || typeof msg.code !== "number") return;
     // The message's own `test` flag (when present) is more trustworthy
@@ -1300,6 +1503,7 @@
     if (msg.code === 551) {
       state.latestQuake = normalizeJmaQuake(msg, flaggedTest);
       renderQuakePanel();
+      markQuakeUnseen();
     } else if (msg.code === 554) {
       // 緊急地震速報の発表検出 — a bare "something was just issued" signal
       // that arrives before the fuller 556 payload below, with no
@@ -1321,6 +1525,7 @@
         // cancellation rather than a fresh warning.
         state.latestEEW = null;
         renderQuakePanel();
+        markQuakeUnseen();
         showEewPopup({ isTest: flaggedTest, cancelled: true });
         return;
       }
@@ -1333,6 +1538,7 @@
         areaCount: Array.isArray(msg.areas) ? msg.areas.length : null,
       };
       renderQuakePanel();
+      markQuakeUnseen();
       showEewPopup(state.latestEEW);
     }
   }
@@ -1358,6 +1564,7 @@
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("message", (event) => {
       if (event.data && event.data.type === "eew") showEewPopup(event.data);
+      if (event.data && event.data.type === "warning") showWarningBar(event.data);
     });
   }
 
@@ -1423,6 +1630,93 @@
     if (!el) return;
     el.classList.remove("show");
     if (eewPopupTimer) { clearTimeout(eewPopupTimer); eewPopupTimer = null; }
+  }
+
+  // ---- 気象警報バー ----
+  // showEewPopup/hideEewPopupと同じ「上から差し込むバナー」の仕組みを
+  // 気象警報向けに複製したもの。トリガーは2経路:
+  //   1) Web Push受信時、タブが開いていればsw.jsからのpostMessage
+  //      (上のnavigator.serviceWorker "message" リスナー)。実際の検知・
+  //      配信元は scripts/weather-warning-push-bridge.js。P2PQuakeの
+  //      ようなリアルタイムWSフィードがJMA側に無いため、EEWと違って
+  //      「タブを開いている間だけの直接接続」経路は存在しない —
+  //      Web Pushが常に唯一の配信経路になる。
+  //   2) 管理者パネルのテスト配信ボタン(isTest:trueでこの関数を直接
+  //      呼ぶだけ — サーバーには一切ラウンドトリップしない。地震速報の
+  //      テスト表示ボタンと同じ「実配信はしない」方針)
+  let warningBarTimer = null;
+  function showWarningBar(data) {
+    let el = document.getElementById("warning-bar");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "warning-bar";
+      el.className = "warning-bar";
+      document.body.appendChild(el);
+    }
+
+    el.innerHTML = `
+      <div class="warning-bar-inner">
+        ${data.isTest ? `<div class="quake-test-badge">テスト配信</div>` : ""}
+        <div class="warning-bar-title">⚠️ ${escapeHtml(data.areaName || "気象警報・注意報")}</div>
+        <div class="warning-bar-body">${escapeHtml(data.headline || "")}</div>
+      </div>
+      <button type="button" class="warning-bar-close" aria-label="閉じる">✕</button>
+    `;
+    el.querySelector(".warning-bar-close").addEventListener("click", hideWarningBar);
+
+    el.classList.remove("show");
+    void el.offsetWidth;
+    el.classList.add("show");
+
+    if (warningBarTimer) clearTimeout(warningBarTimer);
+    warningBarTimer = setTimeout(hideWarningBar, 10000);
+  }
+
+  function hideWarningBar() {
+    const el = document.getElementById("warning-bar");
+    if (!el) return;
+    el.classList.remove("show");
+    if (warningBarTimer) { clearTimeout(warningBarTimer); warningBarTimer = null; }
+  }
+
+  // 運営からのメッセージ(管理者パネル→POST /api/admin/announcements)を
+  // 受信した全タブに即時表示するバナー。showWarningBar/hideWarningBarと
+  // 同じ「上から差し込む」仕組みだが、配信経路はWebSocket
+  // (announcement:new — handleWsMessage参照)のみで、Web Push側の
+  // sw.js "message" リレーは使わない(警報と違い、こちらは配信元が
+  // 自前のサーバーなので、タブが開いていれば必ずWSで直接届くため)。
+  let announcementBarTimer = null;
+  function showAnnouncementBar(data) {
+    let el = document.getElementById("announcement-bar");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "announcement-bar";
+      el.className = "announcement-bar";
+      document.body.appendChild(el);
+    }
+
+    el.innerHTML = `
+      <div class="announcement-bar-inner">
+        <div class="announcement-bar-title">📣 運営からのお知らせ</div>
+        <div class="announcement-bar-body">${escapeHtml(data.message || "")}</div>
+      </div>
+      <button type="button" class="announcement-bar-close" aria-label="閉じる">✕</button>
+    `;
+    el.querySelector(".announcement-bar-close").addEventListener("click", hideAnnouncementBar);
+
+    el.classList.remove("show");
+    void el.offsetWidth;
+    el.classList.add("show");
+
+    if (announcementBarTimer) clearTimeout(announcementBarTimer);
+    announcementBarTimer = setTimeout(hideAnnouncementBar, 10000);
+  }
+
+  function hideAnnouncementBar() {
+    const el = document.getElementById("announcement-bar");
+    if (!el) return;
+    el.classList.remove("show");
+    if (announcementBarTimer) { clearTimeout(announcementBarTimer); announcementBarTimer = null; }
   }
 
   // Reconnect delay after the socket closes, doubling on each consecutive
@@ -1696,9 +1990,10 @@
     if (quakeMapInstance) { quakeMapInstance.remove(); quakeMapInstance = null; }
 
     const map = L.map(mapEl, { scrollWheelZoom: false, zoomControl: true, attributionControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer(TILE_URL, {
       maxZoom: 18,
-      attribution: "&copy; OpenStreetMap contributors",
+      subdomains: TILE_SUBDOMAINS,
+      attribution: TILE_ATTRIBUTION,
     }).addTo(map);
     L.circleMarker([h.lat, h.lon], { radius: 9, color: "#ff6b7a", weight: 2, fillColor: "#ff6b7a", fillOpacity: 0.55 })
       .addTo(map).bindTooltip(h.name || "震源", { permanent: false });
@@ -1799,12 +2094,84 @@
         ${q ? renderQuakeCardHtml(q) : `<div class="quake-empty">受信した地震情報はまだありません</div>`}
         <button type="button" class="btn btn-ghost quake-test-btn" id="quake-test-btn" ${state.quakeTestConnecting ? "disabled" : ""}>${testBtnLabel}</button>
         ${renderWeatherSectionHtml()}
+        ${renderWarningSectionHtml()}
       </div>
     `;
 
     slot.querySelector("#quake-test-btn").addEventListener("click", toggleQuakeSandbox);
     if (q) initQuakeMap(q.hypocenter, slot);
     wireWeatherSection(slot);
+    wireWarningSection(slot);
+  }
+
+  // ---------------------------------------------------------------- ランキング簡易表示（地震情報パネル下部）
+  // 地震情報パネルのすぐ下に、今月の飛行距離トップ5を表示する(フル版は
+  // openLeaderboardModal — ヘッダーの「ランキング」ボタンから開く)。
+  // 未ログインの訪問者にも見せる(quake/newsパネルと同方針)ので、
+  // ログイン状態に関わらずboot()から呼ぶ。
+  async function loadSidebarLeaderboard() {
+    try {
+      const { entries } = await api("/api/logbook/leaderboard?period=month&metric=distance&limit=5");
+      state.sidebarLeaderboard = entries;
+      renderSidebarLeaderboard();
+    } catch {
+      // Non-critical panel — fail silently, same as popular flights/news.
+    }
+  }
+
+  // renderQuakePanel()と同じ「現在マウントされている全コピーに描く」方針
+  // — デスクトップの#sidebar-leaderboard-slot(地震情報パネルの直下)と、
+  // モバイルのボトムシート(地震情報タブを開いている間だけ存在する
+  // #mobile-sidebar-leaderboard-slot)の両方を、呼び出し側が気にせず一度に
+  // 更新できるようにする。
+  function renderSidebarLeaderboard(targetEl) {
+    if (targetEl) {
+      renderSidebarLeaderboardInto(targetEl);
+      return;
+    }
+    const desktopSlot = document.getElementById("sidebar-leaderboard-slot");
+    if (desktopSlot) renderSidebarLeaderboardInto(desktopSlot);
+    if (mobilePanelKind === "quake") {
+      const mobileSlot = document.getElementById("mobile-sidebar-leaderboard-slot");
+      if (mobileSlot) renderSidebarLeaderboardInto(mobileSlot);
+    }
+  }
+
+  function renderSidebarLeaderboardInto(slot) {
+    const list = state.sidebarLeaderboard || [];
+    slot.innerHTML = `
+      <div class="events-sidebar-panel">
+        <div class="events-sidebar-title"><span>🏆</span> 今月のランキング</div>
+        ${!list.length
+          ? `<div class="quake-empty">今月のフライト記録はまだありません</div>`
+          : `<div class="events-sidebar-list">
+              ${list.map((entry, i) => `
+                <button type="button" class="events-sidebar-item" data-callsign="${escapeHtml(entry.user.callsign)}">
+                  <div class="sidebar-leaderboard-lead">
+                    <span class="sidebar-leaderboard-rank">${i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}</span>
+                    ${avatarHtml(entry.user, 28)}
+                  </div>
+                  <div class="events-sidebar-item-body">
+                    <div class="events-sidebar-item-title">${escapeHtml(entry.user.name)}</div>
+                    <div class="events-sidebar-item-meta">
+                      <span>@${escapeHtml(entry.user.callsign)}</span>
+                      <span>・</span>
+                      <span>${Math.round(entry.distanceNm).toLocaleString()}nm</span>
+                    </div>
+                  </div>
+                </button>
+              `).join("")}
+            </div>`
+        }
+        <button type="button" class="btn btn-ghost btn-block events-sidebar-viewall" id="sidebar-leaderboard-viewall">すべて見る</button>
+      </div>
+    `;
+
+    slot.querySelectorAll(".events-sidebar-item").forEach((btn) => {
+      btn.addEventListener("click", () => openUserProfile(btn.dataset.callsign));
+    });
+    const viewAllBtn = slot.querySelector("#sidebar-leaderboard-viewall");
+    if (viewAllBtn) viewAllBtn.addEventListener("click", openLeaderboardModal);
   }
 
   // ---------------------------------------------------------------- 天気予報 (OpenWeatherMap)
@@ -2059,6 +2426,128 @@
     });
   }
 
+  // ---------------------------------------------------------------- 気象警報・注意報 (気象庁, 地震情報パネル下部)
+  // 天気予報検索窓のさらに下に、選んだ都道府県の気象警報・注意報の見出し
+  // 文を表示する。データ元はsrc/routes/weather.jsのGET /api/weather/
+  // warnings（気象庁の非公式JSONをサーバー側でプロキシ）。
+  //
+  // 2026年5月29日の気象庁システム改定で新形式のJSONに変わっており、
+  // 個々の警報種別を確実に判別できる保証がまだ薄いため、サーバー側は
+  // 発表文の見出し(headlineText)をそのまま返すだけに留めている。見出し
+  // が取得できなかった場合も「警報は無い」と決めつけず、気象庁サイトへの
+  // リンクで手動確認を促す(詳細はsrc/routes/weather.jsのコメント参照)。
+  async function loadWarningAreas() {
+    if (state.warningAlert.areas || state.warningAlert.areasLoading) return;
+    state.warningAlert.areasLoading = true;
+    try {
+      const { areas } = await api("/api/weather/warning-areas");
+      state.warningAlert.areas = areas;
+    } catch {
+      // 選択肢が読めなくてもパネル全体を壊さない — プルダウンが空の
+      // まま表示され、後述のrenderで「読み込みに失敗」を出す。
+    } finally {
+      state.warningAlert.areasLoading = false;
+      renderQuakePanelEverywhere();
+    }
+  }
+
+  async function selectWarningArea(areaCode) {
+    state.warningAlert.areaCode = areaCode;
+    state.warningAlert.data = null;
+    state.warningAlert.error = "";
+    if (areaCode) localStorage.setItem(WARNING_AREA_KEY, areaCode);
+    else localStorage.removeItem(WARNING_AREA_KEY);
+    // ログイン中はアカウントにも保存し、サーバー側のpush配信/WSバーの
+    // 対象に含める(未ログインならローカル表示のみで、通知は届かない)。
+    if (state.token) {
+      api("/api/weather/warning-subscription", { method: "PUT", body: JSON.stringify({ areaCode }) }).catch(() => {
+        // 保存に失敗しても閲覧自体は続けられるので、パネルは壊さない。
+      });
+    }
+    if (!areaCode) { renderQuakePanelEverywhere(); return; }
+
+    state.warningAlert.loading = true;
+    renderQuakePanelEverywhere();
+    try {
+      state.warningAlert.data = await api(`/api/weather/warnings?areaCode=${encodeURIComponent(areaCode)}`);
+    } catch (err) {
+      state.warningAlert.error = err.message;
+    } finally {
+      state.warningAlert.loading = false;
+      renderQuakePanelEverywhere();
+    }
+  }
+
+  // ログイン直後、アカウントに保存されている地域とこのブラウザの
+  // localStorageの選択にズレがないか確認する。サーバー側の値がある
+  // 場合はそちらを正として採用(他の端末で選んだ設定を引き継ぐため)、
+  // サーバーが未設定でローカルだけ選んでいる場合はサーバーへ反映する。
+  async function syncWarningAreaSubscription() {
+    try {
+      const { areaCode: serverAreaCode } = await api("/api/weather/warning-subscription");
+      const localAreaCode = state.warningAlert.areaCode;
+      if (serverAreaCode && serverAreaCode !== localAreaCode) {
+        await selectWarningArea(serverAreaCode);
+      } else if (!serverAreaCode && localAreaCode) {
+        api("/api/weather/warning-subscription", { method: "PUT", body: JSON.stringify({ areaCode: localAreaCode }) }).catch(() => {});
+      }
+    } catch {
+      // 起動をブロックしない — 失敗してもローカルの選択のまま動作を続ける。
+    }
+  }
+
+  function renderWarningSectionHtml() {
+    const w = state.warningAlert;
+    const options = (w.areas || [])
+      .map((a) => `<option value="${a.code}" ${a.code === w.areaCode ? "selected" : ""}>${escapeHtml(a.name)}</option>`)
+      .join("");
+
+    let body = "";
+    if (w.error) {
+      body = `<div class="error-banner">${escapeHtml(w.error)}</div>`;
+    } else if (w.loading && !w.data) {
+      body = `<div class="spinner-row">読み込み中...</div>`;
+    } else if (w.data) {
+      const d = w.data;
+      const updated = d.reportDatetime ? fmtTime(d.reportDatetime) : "";
+      body = `
+        <div class="warning-alert-result">
+          ${d.headlines
+            ? `<ul class="warning-alert-headlines">${d.headlines.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`
+            : `<div class="warning-alert-none">${d.fetchError
+                ? "気象庁の情報取得に失敗しました。時間をおいて再度お試しください。"
+                : "見出しを取得できませんでした。最新の状況は気象庁サイトでご確認ください。"}</div>`
+          }
+          <div class="warning-alert-meta">
+            ${d.publishingOffice ? `${escapeHtml(d.publishingOffice)}発表　` : ""}${updated ? `${updated}更新　` : ""}
+            <a href="${d.officialUrl}" target="_blank" rel="noopener noreferrer">気象庁サイトで詳細を見る →</a>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="weather-section warning-alert-section">
+        <div class="weather-section-title">⚠️ 気象警報・注意報</div>
+        <select class="warning-alert-select" id="warning-alert-select">
+          <option value="">地域を選択...</option>
+          ${options}
+        </select>
+        ${body}
+      </div>
+    `;
+  }
+
+  function wireWarningSection(slot) {
+    const select = slot.querySelector("#warning-alert-select");
+    if (!select) return;
+    if (!state.warningAlert.areas) loadWarningAreas();
+    else if (state.warningAlert.areaCode && !state.warningAlert.data && !state.warningAlert.loading && !state.warningAlert.error) {
+      selectWarningArea(state.warningAlert.areaCode); // localStorageから復元した地域を初回だけ自動取得
+    }
+    select.addEventListener("change", () => selectWarningArea(select.value));
+  }
+
   // ---------------------------------------------------------------- render: auth
   // New account creation is Google-only (see routes/auth.js — POST
   // /api/auth/register is disabled server-side for security). This screen
@@ -2069,6 +2558,9 @@
   function renderAuthScreen() {
     root.innerHTML = `
       <div class="auth-wrap">
+        <button type="button" class="btn btn-ghost topbar-btn icon-only auth-theme-toggle" id="auth-theme-toggle-btn" title="表示モードを切り替え" aria-label="表示モードを切り替え">
+          <span class="material-symbols-rounded theme-toggle-icon" aria-hidden="true">light_mode</span>
+        </button>
         <h1>✈️ AeroSocial</h1>
         <p class="sub">パイロットのためのソーシャルフィード</p>
         ${state.error ? `<div class="error-banner">${escapeHtml(state.error)}</div>` : ""}
@@ -2090,6 +2582,9 @@
         </form>
       </div>
     `;
+
+    document.getElementById("auth-theme-toggle-btn").addEventListener("click", toggleTheme);
+    syncThemeToggleIcons();
 
     document.getElementById("auth-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -2120,19 +2615,33 @@
           <span class="material-symbols-rounded ptr-icon" id="ptr-icon" aria-hidden="true">refresh</span>
         </div>
         <div class="topbar">
-          <div class="brand"><span class="dot"></span>AeroSocial</div>
+          <div class="brand">
+            <span class="brand-mark"><span class="material-symbols-rounded" aria-hidden="true">flight</span></span>
+            <span class="brand-name">AeroSocial</span>
+          </div>
           <div class="topbar-actions">
             <div class="ws-indicator"><span class="ws-dot" id="ws-dot"></span></div>
-            <button type="button" class="btn btn-ghost" id="my-posts-btn" style="padding:6px 12px; font-size:13px;">マイ投稿</button>
-            <button type="button" class="btn btn-ghost" id="events-btn" style="padding:6px 12px; font-size:13px;">📅 イベント</button>
-            <button type="button" class="btn btn-ghost" id="notif-settings-btn" style="padding:6px 12px; font-size:13px;">⚙️ 設定</button>
-            ${state.isAdmin ? `<button type="button" class="btn btn-ghost" id="admin-panel-btn" style="padding:6px 12px; font-size:13px;">🛡️ 管理者パネル</button>` : ""}
+            <button type="button" class="btn btn-ghost topbar-btn" id="my-posts-btn"><span class="material-symbols-rounded" aria-hidden="true">dynamic_feed</span>マイ投稿</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="events-btn"><span class="material-symbols-rounded" aria-hidden="true">event</span>イベント</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="leaderboard-btn"><span class="material-symbols-rounded" aria-hidden="true">military_tech</span>ランキング</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="news-hub-btn"><span class="material-symbols-rounded" aria-hidden="true">newspaper</span>ニュース</button>
+            <button type="button" class="btn btn-ghost topbar-btn messages-btn" id="messages-btn"><span class="material-symbols-rounded" aria-hidden="true">campaign</span>メッセージ</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="memo-btn"><span class="material-symbols-rounded" aria-hidden="true">edit_note</span>メモ</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="notif-settings-btn"><span class="material-symbols-rounded" aria-hidden="true">settings</span>設定</button>
+            ${state.isAdmin ? `<button type="button" class="btn btn-ghost topbar-btn" id="admin-panel-btn"><span class="material-symbols-rounded" aria-hidden="true">admin_panel_settings</span>管理者パネル</button>` : ""}
+            <div class="topbar-divider"></div>
+            <button type="button" class="btn btn-ghost topbar-btn icon-only" id="theme-toggle-btn" title="表示モードを切り替え" aria-label="表示モードを切り替え">
+              <span class="material-symbols-rounded theme-toggle-icon" aria-hidden="true">light_mode</span>
+            </button>
             <div id="avatar-slot"></div>
           </div>
         </div>
 
         <div class="main-grid">
-          <div class="sidebar sidebar-left" id="quake-slot"></div>
+          <div class="sidebar sidebar-left">
+            <div id="quake-slot"></div>
+            <div id="sidebar-leaderboard-slot"></div>
+          </div>
 
           <div class="feed-column">
             <div class="composer" id="composer">
@@ -2178,19 +2687,35 @@
           <button type="button" class="tab-btn" id="tab-quake" data-tab="quake" title="地震情報"><span class="material-symbols-rounded" aria-hidden="true">public</span></button>
           <button type="button" class="tab-btn" id="tab-menu" data-tab="menu" title="メニュー"><span class="material-symbols-rounded" aria-hidden="true">menu</span></button>
         </nav>
+
+        <!-- 常時表示のメモ用フローティングボタン。他の全画面ビュー(フライト
+             詳細・ニュース・画像拡大表示など)を開いている最中でも押せる
+             よう、CSS側でそれらより高いz-indexにしてある。メモを開く手段を
+             メニューの奥に隠さず、どの画面からでも一発で前面に呼び出せる
+             ようにするためのショートカット。 -->
+        <button type="button" class="memo-fab" id="memo-fab" title="メモを開く" aria-label="メモを開く">
+          <span aria-hidden="true">📝</span>
+        </button>
       </div>
     `;
 
     setupMobileTabbar();
+    document.getElementById("memo-fab").addEventListener("click", openMemoModal);
 
     document.getElementById("avatar-slot").innerHTML = avatarHtml(state.user, 34);
     document.getElementById("avatar-slot").addEventListener("click", openProfileModal);
     document.getElementById("my-posts-btn").addEventListener("click", () => openUserProfile(state.user.callsign));
     document.getElementById("events-btn").addEventListener("click", openEventsModal);
+    document.getElementById("leaderboard-btn").addEventListener("click", openLeaderboardModal);
+    document.getElementById("news-hub-btn").addEventListener("click", openNewsHubModal);
+    document.getElementById("messages-btn").addEventListener("click", openMessagesModal);
+    document.getElementById("memo-btn").addEventListener("click", openMemoModal);
     document.getElementById("notif-settings-btn").addEventListener("click", openNotificationSettingsModal);
     if (state.isAdmin) {
       document.getElementById("admin-panel-btn").addEventListener("click", openAdminPanelModal);
     }
+    document.getElementById("theme-toggle-btn").addEventListener("click", toggleTheme);
+    syncThemeToggleIcons();
 
     document.getElementById("pick-image-btn").addEventListener("click", () => {
       document.getElementById("composer-file-input").click();
@@ -2282,6 +2807,7 @@
     renderFeedList();
     renderPopularFlights();
     renderQuakePanel();
+    renderMessagesBadge();
   }
 
   // ---------------------------------------------------------------- mobile bottom tab bar
@@ -2332,15 +2858,25 @@
         <button class="modal-close" id="mobile-menu-close">✕</button>
         <h2 style="font-size:15px;">メニュー</h2>
         <div class="sheet-menu-list">
-          <button type="button" class="btn btn-ghost" id="menu-profile-btn">👤 プロフィール編集</button>
-          <button type="button" class="btn btn-ghost" id="menu-my-posts-btn">📝 マイ投稿</button>
-          <button type="button" class="btn btn-ghost" id="menu-events-btn">📅 イベント</button>
-          <button type="button" class="btn btn-ghost" id="menu-settings-btn">⚙️ 設定</button>
-          ${state.isAdmin ? `<button type="button" class="btn btn-ghost" id="menu-admin-btn">🛡️ 管理者パネル</button>` : ""}
+          <button type="button" class="btn btn-ghost" id="menu-profile-btn"><span class="material-symbols-rounded" aria-hidden="true">person</span>プロフィール編集</button>
+          <button type="button" class="btn btn-ghost" id="menu-my-posts-btn"><span class="material-symbols-rounded" aria-hidden="true">dynamic_feed</span>マイ投稿</button>
+          <button type="button" class="btn btn-ghost" id="menu-events-btn"><span class="material-symbols-rounded" aria-hidden="true">event</span>イベント</button>
+          <button type="button" class="btn btn-ghost" id="menu-leaderboard-btn"><span class="material-symbols-rounded" aria-hidden="true">military_tech</span>ランキング</button>
+          <button type="button" class="btn btn-ghost" id="menu-news-hub-btn"><span class="material-symbols-rounded" aria-hidden="true">newspaper</span>ニュース</button>
+          <button type="button" class="btn btn-ghost messages-btn" id="menu-messages-btn"><span class="material-symbols-rounded" aria-hidden="true">campaign</span>メッセージ</button>
+          <button type="button" class="btn btn-ghost" id="menu-memo-btn"><span class="material-symbols-rounded" aria-hidden="true">edit_note</span>メモ</button>
+          <button type="button" class="btn btn-ghost" id="menu-settings-btn"><span class="material-symbols-rounded" aria-hidden="true">settings</span>設定</button>
+          ${state.isAdmin ? `<button type="button" class="btn btn-ghost" id="menu-admin-btn"><span class="material-symbols-rounded" aria-hidden="true">admin_panel_settings</span>管理者パネル</button>` : ""}
+          <button type="button" class="btn btn-ghost" id="menu-theme-toggle-btn">
+            <span class="material-symbols-rounded theme-toggle-icon" aria-hidden="true">light_mode</span>
+            <span id="menu-theme-toggle-label"></span>
+          </button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
+    syncThemeToggleIcons();
+    renderMessagesBadge();
 
     function close() {
       overlay.remove();
@@ -2352,10 +2888,15 @@
     document.getElementById("menu-profile-btn").addEventListener("click", () => { close(); openProfileModal(); });
     document.getElementById("menu-my-posts-btn").addEventListener("click", () => { close(); openUserProfile(state.user.callsign); });
     document.getElementById("menu-events-btn").addEventListener("click", () => { close(); openEventsModal(); });
+    document.getElementById("menu-leaderboard-btn").addEventListener("click", () => { close(); openLeaderboardModal(); });
+    document.getElementById("menu-news-hub-btn").addEventListener("click", () => { close(); openNewsHubModal(); });
+    document.getElementById("menu-messages-btn").addEventListener("click", () => { close(); openMessagesModal(); });
+    document.getElementById("menu-memo-btn").addEventListener("click", () => { close(); openMemoModal(); });
     document.getElementById("menu-settings-btn").addEventListener("click", () => { close(); openNotificationSettingsModal(); });
     if (state.isAdmin) {
       document.getElementById("menu-admin-btn").addEventListener("click", () => { close(); openAdminPanelModal(); });
     }
+    document.getElementById("menu-theme-toggle-btn").addEventListener("click", () => { toggleTheme(); close(); });
   }
 
   // Tracks which panel is currently showing in the mobile bottom sheet (or
@@ -2390,7 +2931,19 @@
       // ニュースは「人気のフライトの下部」という要件をモバイルでも守る
       // ため、同じボトムシートの続きにappendする(専用タブは増やさない)。
       renderNewsPanel(content, true);
-    } else if (kind === "quake") renderQuakePanel(content);
+    } else if (kind === "quake") {
+      quakeUnseen = false;
+      updateQuakeTabBadge();
+      renderQuakePanel(content);
+      // ランキングは地震情報パネルの下に続けて表示する(デスクトップの
+      // #sidebar-leaderboard-slotと同じ並び)。専用の子要素を1つ用意し、
+      // renderSidebarLeaderboard()から見つけて再描画できるようにする
+      // (mobilePanelKind === "quake"の間だけ存在する)。
+      const leaderboardSlot = document.createElement("div");
+      leaderboardSlot.id = "mobile-sidebar-leaderboard-slot";
+      content.appendChild(leaderboardSlot);
+      renderSidebarLeaderboardInto(leaderboardSlot);
+    }
 
     function close() {
       overlay.remove();
@@ -2555,6 +3108,573 @@
     });
   }
 
+  // ---------------------------------------------------------------- Memo (ニーボード)
+  // VATSIMでのフライト中に使うことを想定したメモ機能。テキストメモに加えて
+  // 手書きスケッチ(Pointer Events経由。iPadのApple Pencilはpointerdown/move
+  // イベントのpointerType === "pen"とe.pressureで筆圧を拾える)を1枚のメモに
+  // 両方持たせられる。SimBriefからのフライト情報取得は既存の
+  // GET /api/simbrief/:username(openSimbriefModalと同じエンドポイント)を
+  // 再利用し、テキスト欄にフォーマット済みで挿入する。
+  function openMemoModal() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop news-hub-backdrop memo-backdrop";
+    overlay.innerHTML = `
+      <div class="modal news-hub-modal memo-modal">
+        <div class="news-hub-masthead">
+          <button type="button" class="news-hub-back" id="memo-close" aria-label="閉じる">
+            <span class="news-hub-back-arrow">←</span>
+          </button>
+          <div class="news-hub-masthead-text">
+            <div class="news-hub-masthead-title"><span>📝</span> メモ（ニーボード）</div>
+            <div class="news-hub-masthead-sub">VATSIMのフライト中に。手書き（Apple Pencil対応）も使えます</div>
+          </div>
+          <button type="button" class="btn btn-ghost memo-list-toggle" id="memo-list-toggle" title="メモ一覧">☰ 一覧</button>
+        </div>
+        <div class="memo-body" id="memo-body">
+          <div class="memo-sidebar" id="memo-sidebar">
+            <button type="button" class="btn btn-primary btn-block" id="memo-new-btn">＋ 新規メモ</button>
+            <div class="memo-list" id="memo-list"></div>
+          </div>
+          <div class="memo-editor" id="memo-editor"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.body.classList.add("news-hub-open");
+
+    let memos = [];
+    let currentId = null;
+    let dirty = false;
+    // ペン設定はモーダルを開いている間だけ保持(メモを切り替えても引き継ぐ)。
+    const drawTool = { color: "#1a2233", size: 3, eraser: false };
+    let canvasCtx = null;
+    let hasDrawing = false;
+    let drawing = false;
+    let lastPoint = null;
+
+    function close() {
+      if (dirty && !confirm("保存されていない変更があります。閉じますか？")) return;
+      overlay.remove();
+      // ニュースなど他の全画面ビューを裏に開いたままメモだけ閉じた場合に
+      // 誤って背面スクロールを有効化してしまわないよう、同種のオーバーレイが
+      // 他に残っていないか確認してからクラスを外す。
+      if (!document.querySelector(".news-hub-backdrop")) {
+        document.body.classList.remove("news-hub-open");
+      }
+      document.removeEventListener("keydown", onKey);
+    }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.getElementById("memo-close").addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    document.getElementById("memo-list-toggle").addEventListener("click", () => {
+      overlay.classList.toggle("memo-sidebar-open");
+    });
+    document.getElementById("memo-new-btn").addEventListener("click", () => {
+      if (dirty && !confirm("保存されていない変更があります。破棄して新規作成しますか？")) return;
+      overlay.classList.remove("memo-sidebar-open");
+      loadEditor(null);
+    });
+
+    async function refreshList() {
+      const listEl = document.getElementById("memo-list");
+      if (!listEl) return;
+      listEl.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+      try {
+        const { memos: fetched } = await api("/api/memos");
+        memos = fetched;
+        renderList();
+      } catch (err) {
+        listEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderList() {
+      const listEl = document.getElementById("memo-list");
+      if (!listEl) return;
+      if (!memos.length) {
+        listEl.innerHTML = `<div class="memo-empty">まだメモがありません</div>`;
+        return;
+      }
+      listEl.innerHTML = memos.map((m) => `
+        <button type="button" class="memo-list-item${m.id === currentId ? " active" : ""}" data-id="${m.id}">
+          <div class="memo-list-item-title">${escapeHtml(m.title)}${m.hasDrawing ? " ✏️" : ""}</div>
+          <div class="memo-list-item-preview">${m.textPreview ? escapeHtml(m.textPreview) : "（本文なし）"}</div>
+          <div class="memo-list-item-time">${fmtTime(m.updatedAt)}</div>
+        </button>
+      `).join("");
+      listEl.querySelectorAll(".memo-list-item").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (btn.dataset.id === currentId) { overlay.classList.remove("memo-sidebar-open"); return; }
+          if (dirty && !confirm("保存されていない変更があります。破棄して切り替えますか？")) return;
+          overlay.classList.remove("memo-sidebar-open");
+          loadEditor(btn.dataset.id);
+        });
+      });
+    }
+
+    async function loadEditor(id) {
+      currentId = id;
+      dirty = false;
+      renderList();
+      const editorEl = document.getElementById("memo-editor");
+      if (!id) {
+        renderEditorForm({ title: "", textContent: "", drawingData: null, updatedAt: null });
+        return;
+      }
+      editorEl.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+      try {
+        const { memo } = await api(`/api/memos/${id}`);
+        renderEditorForm(memo);
+      } catch (err) {
+        editorEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderEditorForm(memo) {
+      const editorEl = document.getElementById("memo-editor");
+      editorEl.innerHTML = `
+        <div class="memo-editor-toolbar">
+          <input id="memo-title-input" class="memo-title-input" maxlength="${MEMO_TITLE_MAX}" placeholder="タイトル（未入力は「無題のメモ」）" value="${escapeHtml(memo.title || "")}" />
+          <button type="button" class="btn btn-ghost" id="memo-simbrief-btn">📋 SimBriefから取得</button>
+          <button type="button" class="btn btn-ghost" id="memo-pip-btn" title="別ウィンドウで常時最前面に表示（Chrome/Edge）">🪟 常時表示</button>
+        </div>
+        <div class="memo-canvas-toolbar">
+          <input type="color" id="memo-pen-color" value="${drawTool.color}" title="ペンの色" />
+          <input type="range" id="memo-pen-size" min="1" max="16" value="${drawTool.size}" title="太さ" />
+          <button type="button" class="btn btn-ghost memo-tool-btn" id="memo-eraser-btn" title="消しゴム">🩹 消しゴム</button>
+          <button type="button" class="btn btn-ghost" id="memo-canvas-clear-btn" title="手書きを全消去">🗑️ 全消去</button>
+        </div>
+        <div class="memo-canvas-wrap">
+          <canvas id="memo-canvas" class="memo-canvas"></canvas>
+        </div>
+        <textarea id="memo-text-input" class="memo-text-input" maxlength="${MEMO_TEXT_MAX}" placeholder="テキストメモ（クリアランス、周波数、メモ書きなど）">${escapeHtml(memo.textContent || "")}</textarea>
+        <div class="memo-editor-actions">
+          <div id="memo-status" class="memo-status">${memo.updatedAt ? `最終更新: ${fmtTime(memo.updatedAt)}` : "未保存"}</div>
+          <div class="memo-editor-actions-buttons">
+            ${currentId ? `<button type="button" class="btn btn-ghost" id="memo-delete-btn">削除</button>` : ""}
+            <button type="button" class="btn btn-primary" id="memo-save-btn">保存</button>
+          </div>
+        </div>
+      `;
+
+      setupCanvas(memo.drawingData);
+
+      document.getElementById("memo-title-input").addEventListener("input", markDirty);
+      document.getElementById("memo-text-input").addEventListener("input", markDirty);
+      document.getElementById("memo-simbrief-btn").addEventListener("click", handleSimbriefImport);
+      document.getElementById("memo-pip-btn").addEventListener("click", handleOpenPip);
+      document.getElementById("memo-save-btn").addEventListener("click", handleSave);
+      if (currentId) {
+        document.getElementById("memo-delete-btn").addEventListener("click", handleDelete);
+      }
+      document.getElementById("memo-pen-color").addEventListener("input", (e) => {
+        drawTool.color = e.target.value;
+        drawTool.eraser = false;
+        updateEraserBtn();
+      });
+      document.getElementById("memo-pen-size").addEventListener("input", (e) => {
+        drawTool.size = Number(e.target.value);
+      });
+      document.getElementById("memo-eraser-btn").addEventListener("click", () => {
+        drawTool.eraser = !drawTool.eraser;
+        updateEraserBtn();
+      });
+      document.getElementById("memo-canvas-clear-btn").addEventListener("click", () => {
+        if (!canvasCtx) return;
+        const { width, height } = canvasCtx.canvas;
+        canvasCtx.save();
+        canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
+        canvasCtx.fillStyle = "#ffffff";
+        canvasCtx.fillRect(0, 0, width, height);
+        canvasCtx.restore();
+        hasDrawing = false;
+        markDirty();
+      });
+      updateEraserBtn();
+    }
+
+    function updateEraserBtn() {
+      const btn = document.getElementById("memo-eraser-btn");
+      if (btn) btn.classList.toggle("active", drawTool.eraser);
+    }
+
+    function markDirty() {
+      dirty = true;
+      const statusEl = document.getElementById("memo-status");
+      if (statusEl) statusEl.textContent = "未保存の変更があります";
+    }
+
+    // 手書きキャンバス。Pointer Eventsでマウス/タッチ/Apple Pencilを統一的に
+    // 扱う。pointerType === "pen"のときはe.pressureで筆圧に応じて線の太さを
+    // 変える(マウスやタッチではpressureが0や0.5固定のことが多いため、その
+    // 場合は設定した太さをそのまま使う)。CSS側のtouch-action:noneと合わせて、
+    // 描画中にiPadの画面がスクロールしてしまうのを防ぐ。
+    function setupCanvas(existingDrawingDataUrl) {
+      const canvas = document.getElementById("memo-canvas");
+      const wrap = canvas.parentElement;
+      const dpr = window.devicePixelRatio || 1;
+      const cssWidth = wrap.clientWidth || 320;
+      const cssHeight = Math.round(cssWidth * 0.62);
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
+      canvas.width = Math.round(cssWidth * dpr);
+      canvas.height = Math.round(cssHeight * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
+      canvasCtx = ctx;
+      // 既存の手書きがある場合、画像の読み込みが非同期のためレースで
+      // 保存時にnullを送ってしまわないよう、hasDrawingは同期的に立てておく。
+      hasDrawing = !!existingDrawingDataUrl;
+
+      if (existingDrawingDataUrl) {
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0, cssWidth, cssHeight); };
+        img.src = existingDrawingDataUrl;
+      }
+
+      function pointFromEvent(e) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      }
+      function strokeWidthFor(e) {
+        if (e.pointerType === "pen" && e.pressure > 0) {
+          return Math.max(1, drawTool.size * e.pressure * 1.6);
+        }
+        return drawTool.size;
+      }
+
+      canvas.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        drawing = true;
+        lastPoint = pointFromEvent(e);
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!drawing) return;
+        e.preventDefault();
+        const point = pointFromEvent(e);
+        ctx.strokeStyle = drawTool.eraser ? "#ffffff" : drawTool.color;
+        ctx.lineWidth = drawTool.eraser ? drawTool.size * 3 : strokeWidthFor(e);
+        ctx.beginPath();
+        ctx.moveTo(lastPoint.x, lastPoint.y);
+        ctx.lineTo(point.x, point.y);
+        ctx.stroke();
+        lastPoint = point;
+        hasDrawing = true;
+        markDirty();
+      });
+      function endStroke(e) {
+        if (!drawing) return;
+        drawing = false;
+        try { canvas.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      }
+      canvas.addEventListener("pointerup", endStroke);
+      canvas.addEventListener("pointercancel", endStroke);
+      canvas.addEventListener("pointerleave", endStroke);
+    }
+
+    async function handleSimbriefImport() {
+      const savedUsername = localStorage.getItem(SIMBRIEF_USERNAME_KEY) || "";
+      const username = prompt("SimBriefのユーザー名を入力してください", savedUsername);
+      if (!username) return;
+      localStorage.setItem(SIMBRIEF_USERNAME_KEY, username);
+      const btn = document.getElementById("memo-simbrief-btn");
+      btn.disabled = true;
+      btn.textContent = "取得中...";
+      try {
+        const { flight } = await api(`/api/simbrief/${encodeURIComponent(username)}`);
+        const lines = [
+          `--- SimBriefから取得 (${fmtTime(new Date().toISOString())}) ---`,
+          flight.callsign ? `コールサイン: ${flight.callsign}` : null,
+          (flight.originIcao || flight.destIcao) ? `区間: ${flight.originIcao || "----"} → ${flight.destIcao || "----"}` : null,
+          flight.route ? `ルート: ${flight.route}` : null,
+          flight.cruiseAlt ? `巡航高度: FL${Math.round(flight.cruiseAlt / 100)}` : null,
+          flight.aircraftIcao ? `機材: ${flight.aircraftIcao}` : null,
+          flight.altIcao ? `代替空港: ${flight.altIcao}` : null,
+          "",
+        ].filter((l) => l !== null).join("\n");
+        const textEl = document.getElementById("memo-text-input");
+        textEl.value = (lines + (textEl.value ? "\n" + textEl.value : "")).slice(0, MEMO_TEXT_MAX);
+        markDirty();
+        toast("SimBriefの情報をメモに追加しました。");
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "📋 SimBriefから取得";
+      }
+    }
+
+    function currentDrawingDataUrl() {
+      if (!canvasCtx || !hasDrawing) return null;
+      return canvasCtx.canvas.toDataURL("image/png");
+    }
+
+    async function handleSave() {
+      const saveBtn = document.getElementById("memo-save-btn");
+      const title = document.getElementById("memo-title-input").value.trim();
+      const textContent = document.getElementById("memo-text-input").value;
+      const drawingData = currentDrawingDataUrl();
+      saveBtn.disabled = true;
+      try {
+        let memo;
+        if (currentId) {
+          ({ memo } = await api(`/api/memos/${currentId}`, {
+            method: "PUT",
+            body: JSON.stringify({ title, textContent, drawingData }),
+          }));
+        } else {
+          ({ memo } = await api("/api/memos", {
+            method: "POST",
+            body: JSON.stringify({ title, textContent, drawingData }),
+          }));
+        }
+        dirty = false;
+        toast("メモを保存しました。");
+        await refreshList();
+        await loadEditor(memo.id);
+        return memo;
+      } catch (err) {
+        toast(err.message);
+        saveBtn.disabled = false;
+        return null;
+      }
+    }
+
+    async function handleDelete() {
+      if (!currentId) return;
+      if (!confirm("このメモを削除しますか？元に戻せません。")) return;
+      try {
+        await api(`/api/memos/${currentId}`, { method: "DELETE" });
+        toast("メモを削除しました。");
+        currentId = null;
+        dirty = false;
+        await refreshList();
+        loadEditor(null);
+      } catch (err) {
+        toast(err.message);
+      }
+    }
+
+    // MSFSなどをウィンドウ/ボーダーレス全画面で起動している上に常に浮かせて
+    // おける別ウィンドウでメモを開く。開く前に必ず一度保存し(未保存の変更
+    // やid未発行の新規メモのままだとPiP側で更新先が無いため)、保存済みの
+    // 内容からPiPウィンドウを組み立てる。
+    async function handleOpenPip() {
+      const memo = await handleSave();
+      if (!memo) return;
+      await openMemoPiP(memo);
+    }
+
+    refreshList();
+    loadEditor(null);
+  }
+
+  // ---------------------------------------------------------------- Memo PiP (常時最前面表示)
+  // Document Picture-in-Picture APIで、ブラウザの外にある別アプリ(MSFSを
+  // ウィンドウ表示/ボーダーレス全画面で起動している場合など)の上にも
+  // 常に浮かせておける、OSレベルの「常に最前面」ウィンドウを開く。
+  // - 対応ブラウザはChromium系(Chrome/Edge)のみ(2026年9月時点でSafari/
+  //   Firefoxは非対応)。非対応ブラウザではトーストで案内して終了する。
+  // - MSFSが「排他的フルスクリーン」モードの場合、OSのウィンドウ合成自体が
+  //   バイパスされるため、このウィンドウを含めどんなウィンドウも上に出せ
+  //   ない。ウィンドウモード/ボーダーレスウィンドウにする必要がある。
+  // - PiPウィンドウは独立したトップレベルウィンドウだが、そこに追加した
+  //   要素へ張ったイベントリスナーは呼び出し元(このページ)のJSスコープで
+  //   動く。api()/toast()等の共通ヘルパーをそのまま使えるのはそのため。
+  // - 同一オリジンのstyles.cssをそのまま読み込むことで、ダークテーマの
+  //   配色(CSS変数)を含めてメイン画面と同じ見た目にしている。
+  // - テキスト入力・手書き(ストローク終了時)のたびに800ms後にPUTで自動
+  //   保存する。ウィンドウを閉じた瞬間(pagehide)にも最終保存を試みる。
+  async function openMemoPiP(memo) {
+    if (!("documentPictureInPicture" in window)) {
+      toast("常時最前面表示はChromeまたはEdgeブラウザでのみ使えます（Safari/Firefoxは非対応です）。");
+      return;
+    }
+
+    let pipWindow;
+    try {
+      pipWindow = await documentPictureInPicture.requestWindow({ width: 340, height: 480 });
+    } catch (err) {
+      toast("常時最前面ウィンドウを開けませんでした。");
+      return;
+    }
+
+    Array.from(document.styleSheets).forEach((sheet) => {
+      try {
+        if (!sheet.href) return;
+        const link = pipWindow.document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = sheet.href;
+        pipWindow.document.head.appendChild(link);
+      } catch { /* クロスオリジンのシートは読めないのでスキップ */ }
+    });
+    pipWindow.document.title = "メモ（常時表示）";
+    pipWindow.document.body.className = "memo-pip-body";
+    pipWindow.document.body.innerHTML = `
+      <div class="memo-pip">
+        <div class="memo-pip-toolbar">
+          <input type="color" id="pip-pen-color" value="#1a2233" title="ペンの色" />
+          <input type="range" id="pip-pen-size" min="1" max="16" value="3" title="太さ" />
+          <button type="button" class="btn btn-ghost memo-tool-btn" id="pip-eraser-btn" title="消しゴム">🩹</button>
+          <button type="button" class="btn btn-ghost" id="pip-clear-btn" title="全消去">🗑️</button>
+        </div>
+        <div class="memo-pip-canvas-wrap"><canvas id="pip-canvas" class="memo-canvas"></canvas></div>
+        <textarea id="pip-text" class="memo-text-input memo-pip-text" maxlength="${MEMO_TEXT_MAX}" placeholder="テキストメモ">${escapeHtml(memo.textContent || "")}</textarea>
+        <div class="memo-pip-status" id="pip-status">${escapeHtml(memo.title || "無題のメモ")} ・ 自動保存</div>
+      </div>
+    `;
+
+    const drawTool = { color: "#1a2233", size: 3, eraser: false };
+    let canvasCtx = null;
+    let hasDrawing = !!memo.drawingData;
+    let drawing = false;
+    let lastPoint = null;
+    let saveTimer = null;
+
+    function setStatus(text) {
+      const el = pipWindow.document.getElementById("pip-status");
+      if (el) el.textContent = text;
+    }
+
+    function scheduleSave() {
+      setStatus("保存中…");
+      if (saveTimer) pipWindow.clearTimeout(saveTimer);
+      saveTimer = pipWindow.setTimeout(doSave, 800);
+    }
+
+    async function doSave() {
+      const textEl = pipWindow.document.getElementById("pip-text");
+      if (!textEl) return; // ウィンドウが既に閉じられている
+      const drawingData = canvasCtx && hasDrawing ? canvasCtx.canvas.toDataURL("image/png") : null;
+      try {
+        const { memo: updated } = await api(`/api/memos/${memo.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ textContent: textEl.value, drawingData }),
+        });
+        setStatus(`${updated.title} ・ ${fmtTime(updated.updatedAt)}に保存`);
+      } catch (err) {
+        setStatus("保存に失敗しました");
+      }
+    }
+
+    pipWindow.document.getElementById("pip-text").addEventListener("input", scheduleSave);
+    pipWindow.document.getElementById("pip-pen-color").addEventListener("input", (e) => {
+      drawTool.color = e.target.value;
+      drawTool.eraser = false;
+      updateEraserBtn();
+    });
+    pipWindow.document.getElementById("pip-pen-size").addEventListener("input", (e) => {
+      drawTool.size = Number(e.target.value);
+    });
+    pipWindow.document.getElementById("pip-eraser-btn").addEventListener("click", () => {
+      drawTool.eraser = !drawTool.eraser;
+      updateEraserBtn();
+    });
+    pipWindow.document.getElementById("pip-clear-btn").addEventListener("click", () => {
+      if (!canvasCtx) return;
+      const { width, height } = canvasCtx.canvas;
+      canvasCtx.save();
+      canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
+      canvasCtx.fillStyle = "#ffffff";
+      canvasCtx.fillRect(0, 0, width, height);
+      canvasCtx.restore();
+      hasDrawing = false;
+      scheduleSave();
+    });
+
+    function updateEraserBtn() {
+      const btn = pipWindow.document.getElementById("pip-eraser-btn");
+      if (btn) btn.classList.toggle("active", drawTool.eraser);
+    }
+
+    function setupPipCanvas() {
+      const canvas = pipWindow.document.getElementById("pip-canvas");
+      const wrap = canvas.parentElement;
+
+      function resize() {
+        const dpr = pipWindow.devicePixelRatio || 1;
+        const cssWidth = wrap.clientWidth || 300;
+        const cssHeight = wrap.clientHeight || 220;
+        // リサイズ前の内容を退避して、サイズ変更後に描き直す(手書きが
+        // 消えてしまわないように)。
+        const snapshot = canvasCtx ? canvas.toDataURL("image/png") : (memo.drawingData || null);
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        canvas.width = Math.round(cssWidth * dpr);
+        canvas.height = Math.round(cssHeight * dpr);
+        const ctx = canvas.getContext("2d");
+        ctx.scale(dpr, dpr);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, cssWidth, cssHeight);
+        canvasCtx = ctx;
+        if (snapshot) {
+          const img = pipWindow.document.createElement("img");
+          img.onload = () => ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
+          img.src = snapshot;
+        }
+      }
+      resize();
+      pipWindow.addEventListener("resize", resize);
+
+      function pointFromEvent(e) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      }
+      function strokeWidthFor(e) {
+        if (e.pointerType === "pen" && e.pressure > 0) {
+          return Math.max(1, drawTool.size * e.pressure * 1.6);
+        }
+        return drawTool.size;
+      }
+
+      canvas.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        drawing = true;
+        lastPoint = pointFromEvent(e);
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!drawing) return;
+        e.preventDefault();
+        const point = pointFromEvent(e);
+        canvasCtx.strokeStyle = drawTool.eraser ? "#ffffff" : drawTool.color;
+        canvasCtx.lineWidth = drawTool.eraser ? drawTool.size * 3 : strokeWidthFor(e);
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(lastPoint.x, lastPoint.y);
+        canvasCtx.lineTo(point.x, point.y);
+        canvasCtx.stroke();
+        lastPoint = point;
+        hasDrawing = true;
+      });
+      function endStroke(e) {
+        if (!drawing) return;
+        drawing = false;
+        try { canvas.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+        scheduleSave();
+      }
+      canvas.addEventListener("pointerup", endStroke);
+      canvas.addEventListener("pointercancel", endStroke);
+      canvas.addEventListener("pointerleave", endStroke);
+    }
+
+    setupPipCanvas();
+
+    pipWindow.addEventListener("pagehide", () => {
+      if (saveTimer) pipWindow.clearTimeout(saveTimer);
+      doSave();
+    });
+
+    toast("常時最前面のメモウィンドウを開きました。他のアプリの上に重ねて配置できます。");
+  }
+
   // Adds files picked via the file input, pasted from the clipboard, or
   // dropped onto the composer to the pending image list, enforcing
   // MAX_COMPOSER_IMAGES and silently skipping non-image files (e.g. if a
@@ -2641,25 +3761,54 @@
     }
   }
 
-  // Browsers never execute <script> elements that arrive via
-  // el.innerHTML = "..." — required for ad network snippets (AdSense,
-  // AdMax, ...), which always ship at least one inline <script> alongside
-  // an external one. This sets the container's HTML as usual, then
-  // replaces every <script> inside it with a fresh, browser-executed copy
-  // (attributes and inline body preserved) — the standard workaround.
-  function injectHtmlWithScripts(container, html) {
-    container.innerHTML = html;
-    container.querySelectorAll("script").forEach((oldScript) => {
-      const newScript = document.createElement("script");
-      for (const attr of oldScript.attributes) newScript.setAttribute(attr.name, attr.value);
-      newScript.textContent = oldScript.textContent;
-      oldScript.replaceWith(newScript);
-    });
+  // 広告枠。中身は/api/ads/frame(routes/ads.js参照)が返す、CSPを外した
+  // 独立ドキュメントをiframeで読み込む — document.write()で自身を描画する
+  // 広告ネットワーク(AdMax本体のスクリプトなど)は、このアプリの通常の
+  // nonce/strict-dynamic方式のCSPだと「動的に挿入されたスクリプト」としては
+  // 扱われず(document.writeで挿入されたスクリプトはCSP仕様上
+  // "parser-inserted"扱いになり、strict-dynamicの信頼伝播の対象外という
+  // 仕様上の抜け穴)、ブロックされてしまうため。広告の実寸は広告ユニットに
+  // よって変わるので、高さは固定せず/api/ads/frame側からのpostMessageで
+  // 動的に調整する(下のmessageリスナー参照)。
+  //
+  // sandbox属性はあえて付けない。allow-scripts(スクリプト実行)と
+  // allow-same-origin(自オリジン=このサイト自身としての扱い)を両方
+  // 同時に付けると、フレーム内のスクリプトが自分自身のsandbox制限を
+  // 実質的に無効化できてしまい、ブラウザ側から警告が出る組み合わせに
+  // なる(sandboxの意味が無くなる)。かといってallow-same-originを外すと、
+  // フレームは毎回別オリジン扱いになり、広告ネットワーク側のCookie/
+  // ストレージに基づく処理(重複表示防止や計測など)が正しく動かなくなる
+  // おそれがある。このiframeの中身は/api/ads/frameという自サイト自身の
+  // ルートで、しかも管理者パネルで管理者自身が貼り付けたコードなので
+  // (第三者の未知のiframeを埋め込んでいるわけではない)、sandboxで
+  // 追加隔離する意味はもともと薄い。
+  function adSlotHtml(slotId) {
+    return `
+      <div class="ad-slot" data-ad-slot-id="${slotId}">
+        <span class="ad-slot-label">広告</span>
+        <iframe
+          class="ad-slot-frame"
+          src="/api/ads/frame"
+          scrolling="no"
+          loading="lazy"
+          title="広告"
+        ></iframe>
+      </div>
+    `;
   }
 
-  function adSlotHtml(slotId) {
-    return `<div class="ad-slot" data-ad-slot-id="${slotId}"><span class="ad-slot-label">広告</span></div>`;
-  }
+  // /api/ads/frame内のスクリプト(routes/ads.js参照)からのpostMessageを
+  // 受けて、該当iframeの高さを実寸に合わせる。event.sourceで直接どの
+  // iframeからのメッセージかを判別できるので、スロットIDの受け渡しは
+  // 不要。
+  window.addEventListener("message", (event) => {
+    if (!event.data || event.data.source !== "aerosocial-ad-frame") return;
+    const height = Math.max(50, Math.min(600, Number(event.data.height) || 0));
+    if (!height) return;
+    document.querySelectorAll(".ad-slot-frame").forEach((iframe) => {
+      if (iframe.contentWindow === event.source) iframe.style.height = `${height}px`;
+    });
+  });
 
   function renderFeedList() {
     renderFeedStats();
@@ -2723,8 +3872,11 @@
 
     // Ad code (set via admin panel -> 広告 tab, see openAdminPanelModal)
     // is spliced in after every `frequency` posts, never before the first
-    // one and never past the end of the currently loaded posts.
-    const adCode = state.adConfig.enabled ? state.adConfig.code : "";
+    // one and never past the end of the currently loaded posts. Admins
+    // themselves never see ads in their own feed (state.isAdmin is
+    // verified server-side — see checkAdminStatus — so this can't be
+    // spoofed by a non-admin editing client state).
+    const adCode = state.adConfig.enabled && !state.isAdmin ? state.adConfig.code : "";
     const adFrequency = Math.max(1, Number(state.adConfig.frequency) || 5);
     let adSlotCount = 0;
     const cardsHtml = uniquePosts.map((post, i) => {
@@ -2740,14 +3892,6 @@
     attachFeedListeners();
     const loadMoreBtn = document.getElementById("feed-load-more-btn");
     if (loadMoreBtn) loadMoreBtn.addEventListener("click", loadMoreFeed);
-
-    if (adCode) {
-      list.querySelectorAll(".ad-slot").forEach((slotEl) => {
-        // The label above is only a loading placeholder — replaced
-        // entirely by whatever markup the ad network's snippet renders.
-        injectHtmlWithScripts(slotEl, adCode);
-      });
-    }
   }
 
   function renderFeedLoadMoreHtml() {
@@ -2873,13 +4017,335 @@
     });
   }
 
-  function swapNewsThumbToFallback(imgEl) {
+  function swapNewsThumbToFallback(imgEl, baseClass) {
     const hue = imgEl.dataset.fallbackHue || "28";
     const fallback = document.createElement("div");
-    fallback.className = "news-item-thumb news-item-thumb-fallback";
+    fallback.className = `${baseClass || "news-item-thumb"} news-item-thumb-fallback`;
     fallback.style.setProperty("--news-hue", hue);
     fallback.textContent = "🗞️";
     imgEl.replaceWith(fallback);
+  }
+
+  // ---------------------------------------------------------------- ニュースハブ（おしゃれなニュースサイト風ポップアップ）
+  // トップバー/モバイルメニューの「🗞️ ニュース」ボタンから開く。既存の
+  // #news-panel-slot(サイドバーの簡易リスト)とは別に、大きめのヒーロー
+  // 記事+グリッドで一覧できる専用モーダルを表示する。データソースは
+  // 同じstate.newsで、記事クリックは既存のopenNewsDetailModal()を再利用
+  // する(本文は複製しない方針も踏襲)。
+  // モーダルが開いている間だけ、loadNews()の再フェッチやWS(news:new)受信
+  // のたびにrenderNewsHubBody()が中身を更新できるよう、開いている
+  // overlay要素をここに保持しておく(閉じたらnullに戻す)。
+  let newsHubModalEl = null;
+  // カテゴリータブの選択状態("すべて"は特別扱いのnull)。モーダルを
+  // 開き直すたびにリセットする(開いたまま裏でWS受信してもタブ選択は
+  // 保持したいので、close()以外ではリセットしない)。
+  let newsHubActiveCategory = null;
+
+  // 記事一覧からカテゴリー一覧を作る。バックエンド(services/newsFeed.js)
+  // 側のCATEGORY_RULESの並び順をなるべく尊重したいが、フロント側では
+  // ルール定義そのものを持っていないので、単純に「記事が新しいものから
+  // 見て初登場した順」で並べる(体感的にはだいたい自然な順序になる)。
+  // category未設定(バックエンド再起動前の古い記事など)は「総合」に寄せる。
+  function newsCategoryOf(n) {
+    return n.category || "総合";
+  }
+  function collectNewsCategories(list) {
+    const seen = new Set();
+    for (const n of list) seen.add(newsCategoryOf(n));
+    return Array.from(seen);
+  }
+
+  function newsHubImageHtml(n, imgClass) {
+    if (n.imageUrl) {
+      return `<img class="${imgClass}" src="${escapeHtml(n.imageUrl)}" loading="lazy" alt="" data-fallback-hue="${hueFromString(n.source || n.title)}" data-fallback-class="${imgClass}" />`;
+    }
+    return `<div class="${imgClass} news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}">🗞️</div>`;
+  }
+
+  function renderNewsHubHeroHtml(n) {
+    return `
+      <button type="button" class="news-hub-hero${n.isBreaking ? " news-item-breaking" : ""}" data-news-id="${escapeHtml(n.id)}">
+        ${newsHubImageHtml(n, "news-hub-hero-image")}
+        <div class="news-hub-hero-body">
+          ${n.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
+          ${n.category ? `<span class="news-detail-category">${escapeHtml(n.category)}</span>` : ""}
+          <div class="news-hub-hero-title">${escapeHtml(n.title)}</div>
+          ${n.summary ? `<div class="news-hub-hero-summary">${escapeHtml(n.summary)}</div>` : ""}
+          <div class="news-item-meta">
+            <span class="news-item-source">${escapeHtml(n.source || "")}</span>
+            <span>・</span>
+            <span>${fmtTime(n.publishedAt || n.createdAt)}</span>
+          </div>
+        </div>
+      </button>
+    `;
+  }
+
+  function renderNewsHubCardHtml(n) {
+    return `
+      <button type="button" class="news-hub-card${n.isBreaking ? " news-item-breaking" : ""}" data-news-id="${escapeHtml(n.id)}">
+        ${newsHubImageHtml(n, "news-hub-card-image")}
+        <div class="news-hub-card-body">
+          ${n.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
+          ${n.category ? `<span class="news-hub-card-category">${escapeHtml(n.category)}</span>` : ""}
+          <div class="news-hub-card-title">${escapeHtml(n.title)}</div>
+          ${n.summary ? `<div class="news-hub-card-summary">${escapeHtml(n.summary)}</div>` : ""}
+          <div class="news-item-meta">
+            <span class="news-item-source">${escapeHtml(n.source || "")}</span>
+            <span>・</span>
+            <span>${fmtTime(n.publishedAt || n.createdAt)}</span>
+          </div>
+        </div>
+      </button>
+    `;
+  }
+
+  // グリッドに入りきらない残りは、画像なしの密なテキスト一覧として
+  // 見出し+出典+時刻だけ並べる(PC版で画面の余白を情報で埋めるための
+  // 「その他の見出し」欄 — 新聞サイトの下部見出しリストと同じ考え方)。
+  function renderNewsHubListRowHtml(n) {
+    return `
+      <button type="button" class="news-hub-list-row${n.isBreaking ? " news-item-breaking" : ""}" data-news-id="${escapeHtml(n.id)}">
+        ${n.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
+        ${n.category ? `<span class="news-hub-list-row-category">${escapeHtml(n.category)}</span>` : ""}
+        <span class="news-hub-list-row-title">${escapeHtml(n.title)}</span>
+        <span class="news-hub-list-row-meta">
+          <span class="news-item-source">${escapeHtml(n.source || "")}</span>
+          <span>・</span>
+          <span>${fmtTime(n.publishedAt || n.createdAt)}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  // カテゴリータブ行。「すべて」+ 記事に実際に出現しているカテゴリーの
+  // みを出す(存在しないカテゴリーのタブを出しても空振りになるため)。
+  function renderNewsHubTabs() {
+    if (!newsHubModalEl) return;
+    const tabsEl = newsHubModalEl.querySelector("#news-hub-tabs");
+    if (!tabsEl) return;
+    const list = state.news || [];
+    const categories = collectNewsCategories(list);
+
+    // 選んでいたカテゴリーが(記事の入れ替わりなどで)一覧から消えたら
+    // 「すべて」に戻す。
+    if (newsHubActiveCategory && !categories.includes(newsHubActiveCategory)) {
+      newsHubActiveCategory = null;
+    }
+
+    if (categories.length <= 1) {
+      // カテゴリーが1種類以下ならタブを出す意味が無いので隠す。
+      tabsEl.innerHTML = "";
+      tabsEl.hidden = true;
+      return;
+    }
+    tabsEl.hidden = false;
+
+    const allTabHtml = `
+      <button type="button" class="news-hub-tab${newsHubActiveCategory ? "" : " active"}" data-news-category="">
+        すべて
+      </button>
+    `;
+    const tabsHtml = categories
+      .map(
+        (cat) => `
+      <button type="button" class="news-hub-tab${newsHubActiveCategory === cat ? " active" : ""}" data-news-category="${escapeHtml(cat)}">
+        ${escapeHtml(cat)}
+      </button>
+    `
+      )
+      .join("");
+    tabsEl.innerHTML = allTabHtml + tabsHtml;
+
+    tabsEl.querySelectorAll("[data-news-category]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        newsHubActiveCategory = btn.dataset.newsCategory || null;
+        renderNewsHubTabs();
+        renderNewsHubBody();
+        // タブ切り替え時は一覧の先頭に戻す(前のカテゴリーのスクロール
+        // 位置が残っていると、切り替わったことに気づきにくいため)。
+        const body = newsHubModalEl.querySelector("#news-hub-body");
+        if (body) body.scrollTop = 0;
+      });
+    });
+  }
+
+  function renderNewsHubBody() {
+    if (!newsHubModalEl) return; // モーダルが開いていなければ何もしない
+    const body = newsHubModalEl.querySelector("#news-hub-body");
+    if (!body) return;
+    const list = newsHubActiveCategory
+      ? (state.news || []).filter((n) => newsCategoryOf(n) === newsHubActiveCategory)
+      : state.news || [];
+
+    if (!list.length) {
+      body.innerHTML = `<div class="empty-state">${
+        newsHubActiveCategory ? "このカテゴリーの記事はまだありません。" : "まだニュースはありません。"
+      }</div>`;
+      return;
+    }
+
+    const [hero, ...rest] = list;
+    // グリッドで大きく見せる件数と、その下にテキストのみで密に並べる
+    // 「その他の見出し」件数を分ける(デスクトップは画面が広い分、情報量を
+    // 増やすため後者を多めに出す — 表示はCSS側でモバイルは隠さず折返す)。
+    const gridItems = rest.slice(0, 11);
+    const listItems = rest.slice(11, 50);
+    body.innerHTML = `
+      <div class="news-hub-body-inner">
+        ${renderNewsHubHeroHtml(hero)}
+        <div class="news-hub-grid">
+          ${gridItems.map(renderNewsHubCardHtml).join("")}
+        </div>
+        ${listItems.length ? `
+          <div class="news-hub-list-heading">その他の見出し</div>
+          <div class="news-hub-list">
+            ${listItems.map(renderNewsHubListRowHtml).join("")}
+          </div>
+        ` : ""}
+      </div>
+    `;
+
+    body.querySelectorAll("[data-news-id]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const item = state.news.find((n) => n.id === el.dataset.newsId);
+        if (item) openNewsDetailModal(item);
+      });
+    });
+    // 記事画像の読み込み失敗時のフォールバックは、サイドバー版と同じ
+    // swapNewsThumbToFallback()を再利用するが、ヒーロー画像とグリッド
+    // カード画像はサイズが異なるため、要素自身のクラス(data-fallback-class)
+    // をそのまま引き継いで正しいサイズのプレースホルダーにする。
+    body.querySelectorAll("img[data-fallback-hue]").forEach((img) => {
+      img.addEventListener("error", () => swapNewsThumbToFallback(img, img.dataset.fallbackClass), { once: true });
+    });
+  }
+
+  function openNewsHubModal() {
+    newsHubActiveCategory = null; // 開き直すたびに「すべて」から始める
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop news-hub-backdrop";
+    overlay.innerHTML = `
+      <div class="modal news-hub-modal">
+        <div class="news-hub-masthead">
+          <button type="button" class="news-hub-back" id="news-hub-close" aria-label="閉じる">
+            <span class="news-hub-back-arrow">←</span>
+          </button>
+          <div class="news-hub-masthead-text">
+            <div class="news-hub-masthead-title"><span>🗞️</span> AeroSocial ニュース</div>
+            <div class="news-hub-masthead-sub">日本の最新ニュースをお届け</div>
+          </div>
+        </div>
+        <div class="news-hub-tabs" id="news-hub-tabs" hidden></div>
+        <div id="news-hub-body"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    newsHubModalEl = overlay;
+    // フルスクリーン表示のモーダルを開いている間は背面がスクロールしない
+    // ようにする(通常サイズのモーダルは重なりで気づきにくいが、全画面だと
+    // 背面が動くと目立つため明示的に止める)。
+    document.body.classList.add("news-hub-open");
+
+    function close() {
+      overlay.remove();
+      newsHubModalEl = null;
+      // メモを裏に開いたままニュースだけ閉じた場合に誤って背面スクロールを
+      // 有効化しないよう、同種のオーバーレイが他に残っていないか確認する。
+      if (!document.querySelector(".news-hub-backdrop")) {
+        document.body.classList.remove("news-hub-open");
+      }
+      document.removeEventListener("keydown", onKey);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close();
+    }
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.getElementById("news-hub-close").addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    renderNewsHubTabs();
+    renderNewsHubBody();
+    // 開いた時点で一応最新化しておく(サイドバーと同じ理由 — 取りこぼし埋め)。
+    loadNews();
+  }
+
+  // ---------------------------------------------------------------- 「メッセージ」タブ (運営からのお知らせをDM風に見る)
+  // 上部バナー(showAnnouncementBar)は一過性の速報表示だが、こちらは
+  // 送信履歴を1本の会話のように遡れる一覧。送信元は常に運営(=管理者が
+  // POSTしたもの)なので、双方向のDMではなく片側だけの吹き出しが並ぶ形。
+  let messagesModalEl = null;
+
+  function messageBubbleHtml(m) {
+    return `
+      <div class="dm-message" data-id="${escapeHtml(m.id)}">
+        <div class="dm-avatar" aria-hidden="true">📣</div>
+        <div class="dm-bubble-col">
+          <div class="dm-bubble-meta"><span class="dm-sender">運営${m.authorCallsign ? `（${escapeHtml(m.authorCallsign)}）` : ""}</span></div>
+          <div class="dm-bubble">${escapeHtml(m.message)}</div>
+          <div class="dm-time">${fmtTime(m.createdAt)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // モーダルが開いている間だけ、WS到着時にこの一覧へも即時反映する
+  // (renderNewsHubBody等と同じ「開いていれば直接DOM操作」の方針)。
+  function renderMessagesList() {
+    if (!messagesModalEl) return;
+    const body = messagesModalEl.querySelector("#messages-body");
+    if (!body) return;
+    const wasNearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    if (!state.messagesLoaded) {
+      body.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+      return;
+    }
+    if (!state.messages.length) {
+      body.innerHTML = `<p class="admin-empty">まだ運営からのメッセージはありません</p>`;
+      return;
+    }
+    body.innerHTML = state.messages.map(messageBubbleHtml).join("");
+    // 新着が追記された時は下端に固定し続け、過去ログを読み返している
+    // 最中（下端から離れている）なら邪魔しないようスクロール位置を保つ。
+    if (wasNearBottom) body.scrollTop = body.scrollHeight;
+  }
+
+  function openMessagesModal() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <div class="modal dm-modal">
+        <button class="modal-close" id="messages-close">✕</button>
+        <h2>📣 運営からのメッセージ</h2>
+        <div class="dm-body" id="messages-body"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    messagesModalEl = overlay;
+
+    function close() {
+      overlay.remove();
+      messagesModalEl = null;
+      document.removeEventListener("keydown", onKey);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close();
+    }
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.getElementById("messages-close").addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    renderMessagesList();
+    // 開いた時点の最新メッセージを既読にする(未読バッジを消す)。
+    markMessagesRead();
+    // 最新化して開く(バナーを見逃した/初回ロード前に開いた場合の穴埋め)。
+    loadMessages().then(() => {
+      renderMessagesList();
+      markMessagesRead();
+      // 一覧を開いた直後は最新(=末尾)を見せる。
+      const body = document.getElementById("messages-body");
+      if (body) body.scrollTop = body.scrollHeight;
+    });
   }
 
   // クリックした記事の詳細ポップアップ。APITube側の記事本文はここでは
@@ -3295,29 +4761,19 @@
     }
   }
 
-  // The side-by-side panel only has room from 720px up (see .profile-columns
-  // in styles.css) — below that, the list opens as its own popup instead.
-  function hasFollowPanelRoom() {
-    return window.matchMedia("(min-width: 720px)").matches;
-  }
-
-  // プロフィールのサイドバーに「好きなアニメ」を複数件並べる。各タイトル
-  // ごとに専用のスロットを作り、renderAnimeCard()にそのまま渡す(1件ずつ
-  // 独立して非同期にWikipedia/Jikanへ問い合わせるので、遅い1件が他の
-  // カードの表示をブロックしない)。
+  // プロフィールの「好きなアニメ」タブに複数件並べる。各タイトルごとに
+  // 専用のスロットを作り、renderAnimeCard()にそのまま渡す(1件ずつ独立
+  // して非同期にWikipedia/Jikanへ問い合わせるので、遅い1件が他のカード
+  // の表示をブロックしない)。タブのラベル自体が見出しを兼ねるので、
+  // ここでは中身(カードのリスト)だけを描画する。
   function renderAnimeSidebar(container, titles) {
     if (!container) return;
     const list = (titles || []).filter(Boolean);
     if (!list.length) {
-      container.innerHTML = "";
+      container.innerHTML = `<div class="empty-state">好きなアニメが登録されていません。</div>`;
       return;
     }
-    container.innerHTML = `
-      <div class="profile-anime-sidebar-title">🎬 好きなアニメなど</div>
-      <div class="profile-anime-sidebar-list">
-        ${list.map((_, i) => `<div id="anime-card-slot-${i}"></div>`).join("")}
-      </div>
-    `;
+    container.innerHTML = list.map((_, i) => `<div id="anime-card-slot-${i}"></div>`).join("");
     list.forEach((title, i) => {
       const slot = container.querySelector(`#anime-card-slot-${i}`);
       if (slot) renderAnimeCard(slot, title);
@@ -3434,83 +4890,401 @@
     }
   }
 
-  async function openUserProfile(callsign) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-backdrop";
-    overlay.innerHTML = `
-      <div class="modal profile-modal">
-        <button class="modal-close" id="profile-view-close">✕</button>
-        <div class="profile-columns">
-          <div id="profile-view-slot" class="profile-main-col"><div class="spinner-row">読み込み中...</div></div>
-          <div class="profile-side-col">
-            <div id="profile-anime-sidebar" class="profile-anime-sidebar"></div>
-            <div id="profile-follow-panel" class="profile-follow-panel"></div>
+  // ---------------------------------------------------------------- shared stat/chart widgets
+  // Used by the profile's ログブック/実績 tabs and the ランキング modal.
+  // Reuses the same visual language (and CSS classes) as the admin panel's
+  // own stat cards / bar rows / line chart (see openAdminPanelModal ->
+  // statCard() / renderPostsLineChart() below) — promoted up here as
+  // shared, non-admin-specific helpers instead of copy-pasting a second
+  // near-identical implementation.
+  function statCardHtml(label, value) {
+    return `<div class="admin-stat-card"><div class="admin-stat-value">${escapeHtml(String(value))}</div><div class="admin-stat-label">${escapeHtml(label)}</div></div>`;
+  }
+
+  function barRowHtml(label, value, displayValue, maxValue) {
+    const pct = maxValue > 0 ? Math.round((value / maxValue) * 100) : 0;
+    return `
+      <div class="admin-bar-row">
+        <div class="admin-bar-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+        <div class="admin-bar-track"><div class="admin-bar-fill" style="width:${pct}%"></div></div>
+        <div class="admin-bar-value">${escapeHtml(displayValue)}</div>
+      </div>
+    `;
+  }
+
+  // Lightweight hand-rolled SVG line chart — no charting library dependency
+  // for what's just a single series of ~12 points. `points` is any array;
+  // valueFn/labelFn/tooltipFn read whatever's needed out of each point.
+  function renderLineChart(points, { valueFn, labelFn, tooltipFn, ariaLabel }) {
+    if (!points.length) return `<p class="empty-state">データがありません。</p>`;
+    const width = 600;
+    const height = 180;
+    const padTop = 16;
+    const padBottom = 26;
+    const padX = 8;
+    const maxValue = Math.max(1, ...points.map(valueFn));
+    const plotHeight = height - padTop - padBottom;
+    const stepX = points.length > 1 ? (width - padX * 2) / (points.length - 1) : 0;
+    const xAt = (i) => padX + stepX * i;
+    const yAt = (v) => padTop + plotHeight - (v / maxValue) * plotHeight;
+    const pts = points.map((p, i) => ({ p, x: xAt(i), y: yAt(valueFn(p)) }));
+
+    const linePath = pts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(" ");
+    const areaPath = `${linePath} L${pts[pts.length - 1].x.toFixed(1)},${(height - padBottom).toFixed(1)} `
+      + `L${pts[0].x.toFixed(1)},${(height - padBottom).toFixed(1)} Z`;
+
+    const gridLines = [0, 0.5, 1].map((f) => {
+      const y = padTop + plotHeight - f * plotHeight;
+      return `
+        <line x1="${padX}" y1="${y.toFixed(1)}" x2="${width - padX}" y2="${y.toFixed(1)}" class="admin-linechart-grid" />
+        <text x="0" y="${(y + 3).toFixed(1)}" class="admin-linechart-axis-label">${Math.round(f * maxValue).toLocaleString()}</text>
+      `;
+    }).join("");
+
+    const labelEvery = pts.length > 20 ? 5 : pts.length > 8 ? 2 : 1;
+    const xLabels = pts.map((pt, i) => {
+      if (i % labelEvery !== 0 && i !== pts.length - 1) return "";
+      return `<text x="${pt.x.toFixed(1)}" y="${height - 8}" class="admin-linechart-axis-label" text-anchor="middle">${escapeHtml(labelFn(pt.p))}</text>`;
+    }).join("");
+
+    const dots = pts.map((pt) => `
+      <circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="3.5" class="admin-linechart-dot">
+        <title>${escapeHtml(tooltipFn(pt.p))}</title>
+      </circle>
+    `).join("");
+
+    return `
+      <svg viewBox="0 0 ${width} ${height}" class="admin-linechart" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(ariaLabel || "")}">
+        ${gridLines}
+        <path d="${areaPath}" class="admin-linechart-area" />
+        <path d="${linePath}" class="admin-linechart-line" />
+        ${dots}
+        ${xLabels}
+      </svg>
+    `;
+  }
+
+  // ---------------------------------------------------------------- logbook tab (profile)
+  const LOGBOOK_METRICS = {
+    distanceNm: { label: "距離", fmt: (v) => `${Math.round(v).toLocaleString()}nm` },
+    hours: { label: "時間", fmt: (v) => `${v.toFixed(1)}h` },
+    flights: { label: "フライト数", fmt: (v) => `${Math.round(v).toLocaleString()}件` },
+  };
+
+  async function renderLogbookTab(container, callsign) {
+    container.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+    let data;
+    try {
+      data = await api(`/api/users/${encodeURIComponent(callsign)}/logbook`);
+    } catch (err) {
+      container.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+      return;
+    }
+
+    let metric = "distanceNm";
+
+    function monthlyChartHtml() {
+      const def = LOGBOOK_METRICS[metric];
+      return renderLineChart(data.monthly, {
+        valueFn: (m) => m[metric],
+        labelFn: (m) => { const [y, mo] = m.month.split("-"); return `${y.slice(2)}/${mo}`; },
+        tooltipFn: (m) => `${m.month}: ${def.fmt(m[metric])}`,
+        ariaLabel: "月別の飛行実績推移",
+      });
+    }
+
+    function aircraftHtml() {
+      if (!data.aircraft.length) return `<div class="empty-state">まだフライト記録がありません。</div>`;
+      const top = data.aircraft.slice(0, 8);
+      const maxHours = Math.max(...top.map((a) => a.hours), 1);
+      return `<div class="admin-bar-chart">${top
+        .map((a) => barRowHtml(a.name || a.icao || "不明", a.hours, `${a.hours.toFixed(1)}h`, maxHours))
+        .join("")}</div>`;
+    }
+
+    function airportsHtml() {
+      if (!data.airports.length) return `<div class="empty-state">まだフライト記録がありません。</div>`;
+      const shown = data.airports.slice(0, 15);
+      return `
+        <div class="logbook-airport-list">
+          ${shown.map((a) => `
+            <div class="logbook-airport-row">
+              <div class="logbook-airport-icao">${escapeHtml(a.icao)}</div>
+              <div class="logbook-airport-name">${escapeHtml(a.name || "")}</div>
+              <div class="logbook-airport-visits">${a.visits}回</div>
+            </div>
+          `).join("")}
+        </div>
+        ${data.airportCount > shown.length ? `<div class="logbook-more-note">ほか${data.airportCount - shown.length}空港</div>` : ""}
+      `;
+    }
+
+    function recentHtml() {
+      if (!data.recentFlights.length) return `<div class="empty-state">まだフライト記録がありません。</div>`;
+      return `
+        <div class="logbook-recent-list">
+          ${data.recentFlights.map((f) => `
+            <div class="logbook-recent-row" data-post-id="${escapeHtml(f.postId)}">
+              <div class="logbook-recent-route">${escapeHtml(f.originIcao || "????")} → ${escapeHtml(f.destIcao || "????")}</div>
+              <div class="logbook-recent-meta">${escapeHtml(f.aircraftName || f.aircraftIcao || "機材不明")}${f.distanceNm != null ? ` ・ ${f.distanceNm}nm` : ""}</div>
+              <div class="logbook-recent-date">${fmtTime(f.createdAt)}</div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    function render() {
+      const t = data.totals;
+      container.innerHTML = `
+        <div class="admin-stat-grid">
+          ${statCardHtml("総フライト数", t.flights.toLocaleString())}
+          ${statCardHtml("総飛行時間", `${t.hours.toFixed(1)}h`)}
+          ${statCardHtml("総飛行距離", `${Math.round(t.distanceNm).toLocaleString()}nm`)}
+          ${statCardHtml("就航空港数", data.airportCount.toLocaleString())}
+        </div>
+
+        <div class="admin-section-title-row" style="margin-top:20px;">
+          <h4 style="margin:0; font-size:14px;">月別の推移</h4>
+          <div class="admin-toggle-group" id="logbook-metric-toggle">
+            ${Object.entries(LOGBOOK_METRICS).map(([key, def]) => `
+              <button type="button" data-metric="${key}" class="${key === metric ? "active" : ""}">${def.label}</button>
+            `).join("")}
           </div>
         </div>
+        <div class="admin-linechart-wrap" id="logbook-chart-wrap">${monthlyChartHtml()}</div>
+
+        <h4 style="margin:20px 0 10px; font-size:14px;">機材別の飛行時間</h4>
+        ${aircraftHtml()}
+
+        <h4 style="margin:20px 0 10px; font-size:14px;">就航空港</h4>
+        ${airportsHtml()}
+
+        <h4 style="margin:20px 0 10px; font-size:14px;">最近のフライト</h4>
+        ${recentHtml()}
+      `;
+
+      container.querySelectorAll("#logbook-metric-toggle button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (btn.dataset.metric === metric) return;
+          metric = btn.dataset.metric;
+          container.querySelectorAll("#logbook-metric-toggle button").forEach((b) => b.classList.toggle("active", b === btn));
+          container.querySelector("#logbook-chart-wrap").innerHTML = monthlyChartHtml();
+        });
+      });
+      container.querySelectorAll(".logbook-recent-row").forEach((row) => {
+        row.addEventListener("click", () => openPostDetail(row.dataset.postId));
+      });
+    }
+
+    render();
+  }
+
+  // ---------------------------------------------------------------- achievements tab (profile)
+  const ACHIEVEMENT_CATEGORY_LABELS = {
+    flights: "フライト数",
+    hours: "飛行時間",
+    distance: "飛行距離",
+    airports: "就航空港数",
+    landmark: "到着空港",
+  };
+
+  async function renderAchievementsTab(container, callsign) {
+    container.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+    let data;
+    try {
+      data = await api(`/api/users/${encodeURIComponent(callsign)}/achievements`);
+    } catch (err) {
+      container.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+      return;
+    }
+
+    const byCategory = new Map();
+    data.achievements.forEach((a) => {
+      if (!byCategory.has(a.category)) byCategory.set(a.category, []);
+      byCategory.get(a.category).push(a);
+    });
+
+    function badgeCardHtml(a) {
+      const progress = a.target
+        ? `<div class="admin-bar-track badge-progress-track"><div class="admin-bar-fill" style="width:${Math.round((a.current / a.target) * 100)}%"></div></div>`
+        : "";
+      return `
+        <div class="badge-card${a.earned ? " earned" : ""}">
+          <div class="badge-icon">${a.icon}</div>
+          <div class="badge-label">${escapeHtml(a.label)}</div>
+          <div class="badge-description">${escapeHtml(a.description)}</div>
+          ${progress}
+        </div>
+      `;
+    }
+
+    container.innerHTML = `
+      <div class="admin-stat-grid admin-stat-grid-2" style="margin-bottom:20px;">
+        ${statCardHtml("達成済み", `${data.earnedCount} / ${data.totalCount}`)}
+        ${statCardHtml("達成率", `${Math.round((data.earnedCount / data.totalCount) * 100)}%`)}
+      </div>
+      ${Array.from(byCategory.entries()).map(([category, list]) => `
+        <h4 style="margin:20px 0 10px; font-size:14px;">${escapeHtml(ACHIEVEMENT_CATEGORY_LABELS[category] || category)}</h4>
+        <div class="badge-grid">${list.map(badgeCardHtml).join("")}</div>
+      `).join("")}
+    `;
+  }
+
+  // ---------------------------------------------------------------- leaderboard (ランキング)
+  // Public, everyone-can-see ranking by distance/hours/flights, this month
+  // or all-time — distinct from the admin panel's own stats tab (which is
+  // admin-only and about the platform as a whole). See
+  // GET /api/logbook/leaderboard (routes/logbook.js).
+  const LEADERBOARD_METRIC_FMT = {
+    distance: (e) => `${Math.round(e.distanceNm).toLocaleString()}nm`,
+    hours: (e) => `${e.hours.toFixed(1)}h`,
+    flights: (e) => `${e.flights.toLocaleString()}件`,
+  };
+
+  function leaderboardRowHtml(entry, fmt, isMe) {
+    const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
+    return `
+      <div class="leaderboard-row${isMe ? " is-me" : ""}" data-callsign="${escapeHtml(entry.user.callsign)}">
+        <div class="leaderboard-rank">${medal || `#${entry.rank}`}</div>
+        ${avatarHtml(entry.user, 32)}
+        <div class="leaderboard-name">
+          <div class="leaderboard-display-name">${escapeHtml(entry.user.name)}</div>
+          <div class="leaderboard-callsign">@${escapeHtml(entry.user.callsign)}</div>
+        </div>
+        <div class="leaderboard-value">${fmt(entry)}</div>
+      </div>
+    `;
+  }
+
+  function openLeaderboardModal() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop mobile-sheet-backdrop";
+    overlay.innerHTML = `
+      <div class="modal profile-modal">
+        <button class="modal-close" id="leaderboard-close">✕</button>
+        <h2 style="font-size:16px;">🏆 ランキング</h2>
+        <div class="admin-section-title-row" style="margin-top:0;">
+          <div class="admin-toggle-group" id="leaderboard-period-toggle">
+            <button type="button" data-period="month" class="active">今月</button>
+            <button type="button" data-period="all">全期間</button>
+          </div>
+          <div class="admin-toggle-group" id="leaderboard-metric-toggle">
+            <button type="button" data-metric="distance" class="active">距離</button>
+            <button type="button" data-metric="hours">時間</button>
+            <button type="button" data-metric="flights">フライト数</button>
+          </div>
+        </div>
+        <div id="leaderboard-body"><div class="spinner-row">読み込み中...</div></div>
       </div>
     `;
     document.body.appendChild(overlay);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector("#profile-view-close").addEventListener("click", () => overlay.remove());
+    overlay.querySelector("#leaderboard-close").addEventListener("click", () => overlay.remove());
 
-    // Which list (if any) the side panel currently shows, so clicking the
-    // same stat twice closes it instead of re-fetching.
-    let activeFollowPanel = null;
+    let period = "month";
+    let metric = "distance";
 
-    // Fills the side panel with `callsign`'s followers or following list.
-    // Clicking the same stat again (activeFollowPanel already === kind)
-    // hides the panel instead of re-fetching. Desktop/tablet only — see
-    // hasFollowPanelRoom().
-    async function showFollowPanel(kind) {
-      const panel = overlay.querySelector("#profile-follow-panel");
-      if (!panel) return;
-
-      if (activeFollowPanel === kind) {
-        panel.classList.remove("is-open");
-        activeFollowPanel = null;
+    function renderBody(data) {
+      const body = overlay.querySelector("#leaderboard-body");
+      const fmt = LEADERBOARD_METRIC_FMT[metric];
+      if (!data.entries.length) {
+        body.innerHTML = `<div class="empty-state">まだフライト記録がありません。</div>`;
         return;
       }
-      activeFollowPanel = kind;
-
-      const title = kind === "followers" ? "フォロワー" : "フォロー中";
-      panel.classList.add("is-open");
-      panel.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h4 style="margin:0; font-size:14px; font-weight:700;">${title}</h4>
-          <button class="modal-close" id="follow-panel-close" style="float:none; font-size:16px; padding:0;">✕</button>
+      const meInTop = data.me && data.entries.some((e) => e.user.callsign === data.me.user.callsign);
+      body.innerHTML = `
+        <div class="leaderboard-list">
+          ${data.entries.map((e) => leaderboardRowHtml(e, fmt, state.user && e.user.callsign === state.user.callsign)).join("")}
         </div>
-        <div id="follow-panel-body"></div>
+        ${data.me && !meInTop ? `
+          <div class="leaderboard-me-divider">あなたの順位</div>
+          <div class="leaderboard-list">${leaderboardRowHtml(data.me, fmt, true)}</div>
+        ` : ""}
       `;
-      panel.querySelector("#follow-panel-close").addEventListener("click", () => {
-        panel.classList.remove("is-open");
-        activeFollowPanel = null;
+      body.querySelectorAll(".leaderboard-row").forEach((row) => {
+        row.addEventListener("click", () => openUserProfile(row.dataset.callsign));
       });
-
-      await loadFollowList(
-        panel.querySelector("#follow-panel-body"),
-        callsign,
-        kind,
-        () => activeFollowPanel !== kind
-      );
     }
 
-    // Phone-width fallback: no room for a side panel, so the list opens as
-    // its own popup stacked on top of the profile instead.
-    function openFollowListPopup(kind) {
-      const title = kind === "followers" ? "フォロワー" : "フォロー中";
-      const popup = document.createElement("div");
-      popup.className = "modal-backdrop";
-      popup.innerHTML = `
-        <div class="modal" style="max-width:360px;">
-          <button class="modal-close" id="follow-popup-close">✕</button>
-          <h3 style="margin-bottom:14px;">${title}</h3>
-          <div id="follow-popup-body"></div>
-        </div>
-      `;
-      document.body.appendChild(popup);
-      popup.addEventListener("click", (e) => { if (e.target === popup) popup.remove(); });
-      popup.querySelector("#follow-popup-close").addEventListener("click", () => popup.remove());
-      loadFollowList(popup.querySelector("#follow-popup-body"), callsign, kind);
+    async function load() {
+      const body = overlay.querySelector("#leaderboard-body");
+      body.innerHTML = `<div class="spinner-row">読み込み中...</div>`;
+      try {
+        const data = await api(`/api/logbook/leaderboard?period=${period}&metric=${metric}&limit=20`);
+        renderBody(data);
+      } catch (err) {
+        body.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    overlay.querySelectorAll("#leaderboard-period-toggle button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.period === period) return;
+        period = btn.dataset.period;
+        overlay.querySelectorAll("#leaderboard-period-toggle button").forEach((b) => b.classList.toggle("active", b === btn));
+        load();
+      });
+    });
+    overlay.querySelectorAll("#leaderboard-metric-toggle button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.metric === metric) return;
+        metric = btn.dataset.metric;
+        overlay.querySelectorAll("#leaderboard-metric-toggle button").forEach((b) => b.classList.toggle("active", b === btn));
+        load();
+      });
+    });
+
+    load();
+  }
+
+  // Profile popup: a fixed header (avatar/name/bio/flight stats) followed
+  // by a tab bar — 投稿 / フォロワー / フォロー中 / (あれば)好きなアニメ —
+  // switching a single content area. Each tab's content is fetched once,
+  // the first time it's opened, and then just shown/hidden after that.
+  async function openUserProfile(callsign) {
+    const overlay = document.createElement("div");
+    // mobile-sheet-backdrop: below 900px this makes the profile popup slide
+    // up as a bottom sheet (like the quake/menu panels) instead of sitting
+    // as a small centered card — easier to reach one-handed and the close
+    // button lands in a predictable spot instead of floating mid-screen.
+    // Desktop is untouched (see .mobile-sheet-backdrop in styles.css).
+    overlay.className = "modal-backdrop mobile-sheet-backdrop";
+    overlay.innerHTML = `
+      <div class="modal profile-modal">
+        <button class="modal-close" id="profile-view-close">✕</button>
+        <div class="profile-header-banner"></div>
+        <div id="profile-view-slot"><div class="spinner-row">読み込み中...</div></div>
+        <div id="profile-tabs" class="profile-tabs" hidden></div>
+        <div id="profile-tab-posts" class="profile-tab-panel"></div>
+        <div id="profile-tab-logbook" class="profile-tab-panel" hidden></div>
+        <div id="profile-tab-achievements" class="profile-tab-panel" hidden></div>
+        <div id="profile-tab-followers" class="profile-tab-panel" hidden></div>
+        <div id="profile-tab-following" class="profile-tab-panel" hidden></div>
+        <div id="profile-tab-anime" class="profile-tab-panel" hidden></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const profileModalEl = overlay.querySelector(".profile-modal");
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector("#profile-view-close").addEventListener("click", () => overlay.remove());
+
+    let activeTab = "posts";
+    const loadedTabs = new Set();
+    // Actual per-tab loaders are assigned once `user`/`posts` are known,
+    // below — this indirection just lets showTab() be wired up before
+    // that data arrives.
+    let loadTabContent = () => {};
+
+    function showTab(tab) {
+      activeTab = tab;
+      overlay.querySelectorAll(".profile-tab-panel").forEach((el) => {
+        el.hidden = el.id !== `profile-tab-${tab}`;
+      });
+      overlay.querySelectorAll(".profile-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === tab);
+      });
+      loadTabContent(tab);
     }
 
     try {
@@ -3530,6 +5304,8 @@
       // Own profile never shows a follow button against yourself.
       const isOwnProfile = state.user && state.user.callsign === user.callsign;
       let followState = { followerCount: follow.followerCount, isFollowedByMe: follow.isFollowedByMe };
+      const followingCount = follow.followingCount;
+      const animeList = (user.favoriteAnimeList || []).filter(Boolean);
 
       const slot = overlay.querySelector("#profile-view-slot");
       if (!slot) return;
@@ -3545,26 +5321,24 @@
       }
 
       slot.innerHTML = `
-        <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
-          ${avatarHtml(user, 64)}
-          <div style="flex:1; min-width:0;">
-            <div style="font-weight:700; font-size:17px;">${escapeHtml(user.name)}</div>
-            <div style="color:var(--text-dim); font-size:13px;">@${escapeHtml(user.callsign)}${user.homeBase ? ` · ${escapeHtml(user.homeBase)}` : ""}</div>
+        <div class="profile-header-top">
+          <div class="profile-header-avatar-wrap">${avatarHtml(user)}</div>
+          <div class="profile-header-info">
+            <div class="profile-header-name">${escapeHtml(user.name)}</div>
+            <div class="profile-header-handle">@${escapeHtml(user.callsign)}${user.homeBase ? ` · ${escapeHtml(user.homeBase)}` : ""}</div>
           </div>
-          <div id="profile-follow-btn-slot" style="flex-shrink:0;">${renderFollowButton()}</div>
+          <div id="profile-follow-btn-slot" class="profile-header-follow-slot">${renderFollowButton()}</div>
         </div>
-        ${user.bio ? `<div style="margin-bottom:14px; font-size:14px;">${linkify(escapeHtml(user.bio))}</div>` : ""}
-        <div style="display:flex; flex-wrap:wrap; row-gap:10px; gap:22px; margin-bottom:14px; font-size:13px; color:var(--text-dim);">
-          <div><b style="color:var(--accent-2); display:block; font-size:16px;">${stats.flights}</b>フライト</div>
-          <div><b style="color:var(--accent-2); display:block; font-size:16px;">${stats.hours.toFixed(1)}</b>時間</div>
-          <div><b style="color:var(--accent-2); display:block; font-size:16px;">${Math.round(stats.distanceNm)}</b>nm</div>
-          <div id="profile-follower-count" data-action="show-followers" style="cursor:pointer;"><b style="color:var(--accent-2); display:block; font-size:16px;">${followState.followerCount}</b>フォロワー</div>
-          <div data-action="show-following" style="cursor:pointer;"><b style="color:var(--accent-2); display:block; font-size:16px;">${follow.followingCount}</b>フォロー中</div>
+        ${user.bio ? `<div class="profile-header-bio">${linkify(escapeHtml(user.bio))}</div>` : ""}
+        <div class="profile-header-stats">
+          <div class="profile-header-stat"><b>${stats.flights}</b>フライト</div>
+          <div class="profile-header-stat"><b>${stats.hours.toFixed(1)}</b>時間</div>
+          <div class="profile-header-stat"><b>${Math.round(stats.distanceNm)}</b>nm</div>
         </div>
-        <div id="profile-view-posts"></div>
       `;
-
-      renderAnimeSidebar(overlay.querySelector("#profile-anime-sidebar"), user.favoriteAnimeList);
+      if (profileModalEl) {
+        profileModalEl.style.setProperty("--profile-hue", Number.isFinite(user.hue) ? user.hue : 200);
+      }
 
       const followBtn = slot.querySelector("#profile-follow-btn-slot");
       if (followBtn) {
@@ -3577,8 +5351,15 @@
             const result = await api(`/api/users/${encodeURIComponent(user.callsign)}/follow`, { method: "POST" });
             followState = { followerCount: result.followerCount, isFollowedByMe: result.following };
             followBtn.innerHTML = renderFollowButton();
-            const countEl = slot.querySelector("#profile-follower-count");
-            if (countEl) countEl.innerHTML = `<b style="color:var(--accent-2); display:block; font-size:16px;">${followState.followerCount}</b>フォロワー`;
+            const tabBtn = overlay.querySelector('[data-tab="followers"]');
+            if (tabBtn) tabBtn.textContent = `フォロワー ${followState.followerCount}`;
+            // フォロー状態が変われば、開いているフォロワー一覧にも自分の
+            // 有無が反映されるはずなので、表示中ならキャッシュを捨てて
+            // 再取得する。
+            if (loadedTabs.has("followers")) {
+              loadedTabs.delete("followers");
+              if (activeTab === "followers") loadTabContent("followers");
+            }
           } catch (err) {
             toast(err.message);
           } finally {
@@ -3587,25 +5368,29 @@
         });
       }
 
-      const followersCountEl = slot.querySelector('[data-action="show-followers"]');
-      if (followersCountEl) {
-        followersCountEl.addEventListener("click", () => {
-          if (hasFollowPanelRoom()) showFollowPanel("followers");
-          else openFollowListPopup("followers");
-        });
-      }
-      const followingCountEl = slot.querySelector('[data-action="show-following"]');
-      if (followingCountEl) {
-        followingCountEl.addEventListener("click", () => {
-          if (hasFollowPanelRoom()) showFollowPanel("following");
-          else openFollowListPopup("following");
-        });
-      }
+      // ---- タブバー: 投稿 / フォロワー / フォロー中 / (あれば)好きなアニメ
+      const tabsEl = overlay.querySelector("#profile-tabs");
+      const tabDefs = [
+        { id: "posts", label: "投稿" },
+        { id: "logbook", label: "📊 ログブック" },
+        { id: "achievements", label: "🏆 実績" },
+        { id: "followers", label: `フォロワー ${followState.followerCount}` },
+        { id: "following", label: `フォロー中 ${followingCount}` },
+      ];
+      if (animeList.length) tabDefs.push({ id: "anime", label: "🎬 好きなアニメ" });
+      tabsEl.hidden = false;
+      tabsEl.innerHTML = tabDefs.map((t) => `
+        <button type="button" class="profile-tab-btn${t.id === "posts" ? " active" : ""}" data-tab="${t.id}">${escapeHtml(t.label)}</button>
+      `).join("");
+      tabsEl.querySelectorAll(".profile-tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => showTab(btn.dataset.tab));
+      });
+      if (!animeList.length) overlay.querySelector("#profile-tab-anime").hidden = true;
 
+      // ---- 各タブの中身
       const postIds = posts.map((p) => p.id);
-
       function renderProfilePosts() {
-        const postsSlot = slot.querySelector("#profile-view-posts");
+        const postsSlot = overlay.querySelector("#profile-tab-posts");
         if (!postsSlot) return;
         const current = postIds.map((id) => state.posts.find((p) => p.id === id)).filter(Boolean);
         if (!current.length) {
@@ -3623,7 +5408,24 @@
         });
       }
 
-      renderProfilePosts();
+      loadTabContent = function loadTabContent(tab) {
+        if (loadedTabs.has(tab)) return;
+        loadedTabs.add(tab);
+        if (tab === "posts") renderProfilePosts();
+        else if (tab === "logbook") {
+          renderLogbookTab(overlay.querySelector("#profile-tab-logbook"), callsign);
+        } else if (tab === "achievements") {
+          renderAchievementsTab(overlay.querySelector("#profile-tab-achievements"), callsign);
+        } else if (tab === "followers") {
+          loadFollowList(overlay.querySelector("#profile-tab-followers"), callsign, "followers", () => activeTab !== "followers");
+        } else if (tab === "following") {
+          loadFollowList(overlay.querySelector("#profile-tab-following"), callsign, "following", () => activeTab !== "following");
+        } else if (tab === "anime") {
+          renderAnimeSidebar(overlay.querySelector("#profile-tab-anime"), animeList);
+        }
+      };
+
+      loadTabContent("posts");
     } catch (err) {
       const slot = overlay.querySelector("#profile-view-slot");
       if (slot) slot.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
@@ -3702,6 +5504,72 @@
     return [originPt, ...mid, destPt];
   }
 
+  // Adds the initial Esri basemap tile layer to `map` plus a small button
+  // (top-right, alongside the zoom control) that cycles through
+  // BASEMAP_STYLES (街道地図 → 地形図 → 衛星写真 → …) on click. Shared by
+  // every Leaflet map in this file that should offer a style switch
+  // (initFlightDetailMap, initFullscreenMap, …) so the behavior/appearance
+  // stays identical everywhere instead of being copy-pasted per map.
+  // Styled entirely via inline styles (not styles.css) because Leaflet's
+  // own CSS (.leaflet-bar a) forces a fixed 26x26px white box on any <a>
+  // inside a .leaflet-bar container, which clips/whites-out a text label
+  // like "衛星写真" — inline styles win regardless of stylesheet load
+  // order or caching, so the label is never at the mercy of that.
+  function addBasemapLayerWithSwitch(map) {
+    let styleIndex = 0;
+    let baseLayer = L.tileLayer(BASEMAP_STYLES[styleIndex].url, {
+      maxZoom: TILE_MAX_ZOOM,
+      attribution: BASEMAP_STYLES[styleIndex].attribution,
+    }).addTo(map);
+
+    // "layers" icon (stacked squares) — a generic, style-agnostic symbol
+    // for "switch basemap", so the button doesn't need to resize for each
+    // style's label text.
+    const LAYERS_ICON_SVG = `
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>`;
+
+    // Placed bottom-left (not top-right, which the fullscreen view's own
+    // ✕ close button already occupies) so it never overlaps that button.
+    const StyleSwitchControl = L.Control.extend({
+      options: { position: "bottomleft" },
+      onAdd() {
+        const container = L.DomUtil.create("div", "leaflet-bar map-style-switch");
+        const btn = L.DomUtil.create("a", "map-style-switch-btn", container);
+        btn.href = "#";
+        btn.innerHTML = LAYERS_ICON_SVG;
+        btn.style.cssText = [
+          "display:flex", "align-items:center", "justify-content:center",
+          "width:30px", "height:30px", "background:#1a2338", "color:#e8ecf4",
+          "border:1px solid #2c374e", "border-radius:4px",
+          "text-decoration:none", "box-sizing:border-box",
+        ].join(";");
+        const render = () => { btn.title = `地図の種類を切り替え（現在: ${BASEMAP_STYLES[styleIndex].label}）`; };
+        render();
+        L.DomEvent.on(btn, "mouseover", () => { btn.style.background = "#232f4a"; });
+        L.DomEvent.on(btn, "mouseout", () => { btn.style.background = "#1a2338"; });
+        L.DomEvent.on(btn, "click", (e) => {
+          L.DomEvent.preventDefault(e);
+          L.DomEvent.stopPropagation(e);
+          styleIndex = (styleIndex + 1) % BASEMAP_STYLES.length;
+          const next = BASEMAP_STYLES[styleIndex];
+          map.removeLayer(baseLayer);
+          baseLayer = L.tileLayer(next.url, { maxZoom: TILE_MAX_ZOOM, attribution: next.attribution }).addTo(map);
+          baseLayer.bringToBack();
+          render();
+        });
+        L.DomEvent.disableClickPropagation(container);
+        return container;
+      },
+    });
+    map.addControl(new StyleSwitchControl());
+    return baseLayer;
+  }
+
   function initFlightDetailMap(f) {
     const mapEl = document.getElementById("flight-detail-map");
     if (!mapEl) return null;
@@ -3709,10 +5577,7 @@
     const destPt = [f.destLat, f.destLon];
 
     const map = L.map(mapEl, { scrollWheelZoom: false, zoomControl: true, attributionControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    addBasemapLayerWithSwitch(map);
 
     const line = L.polyline(flightPath(f), { color: "#4da3ff", weight: 3 }).addTo(map);
 
@@ -3779,10 +5644,7 @@
     const destPt = [f.destLat, f.destLon];
 
     const map = L.map(mapEl, { zoomControl: true, attributionControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    addBasemapLayerWithSwitch(map);
 
     const line = L.polyline(flightPath(f), { color: "#4da3ff", weight: 3, dashArray: "2 8" }).addTo(map);
 
@@ -4129,9 +5991,8 @@
   // A single modal covers both the browsable list (upcoming/past tabs) and
   // the create form (toggled inline within the same modal, same on/off
   // pattern as pendingPoll in the composer). Clicking an event card opens
-  // its detail (participant list) in a second, stacked popup — same
-  // "second modal on top" pattern openFollowListPopup uses from the
-  // profile view.
+  // its detail (participant list) in a second, stacked popup — the same
+  // "second modal on top" pattern used elsewhere in this file.
   function eventTypeLabel(eventType) {
     return eventType === "flight" ? "✈️ フライト" : "🎉 イベント";
   }
@@ -4181,7 +6042,8 @@
     };
 
     const overlay = document.createElement("div");
-    overlay.className = "modal-backdrop";
+    // See the same mobile-sheet-backdrop comment in openUserProfile() above.
+    overlay.className = "modal-backdrop mobile-sheet-backdrop";
     overlay.innerHTML = `
       <div class="modal events-modal">
         <button class="modal-close" id="events-close">✕</button>
@@ -4517,9 +6379,20 @@
       adsEnabled: false,
       adsCode: "",
       adsFrequency: 5,
+      postsSeries: null,
+      postsSeriesGranularity: "week",
+      postsSeriesLoading: false,
+      postsSeriesError: "",
       quakeTestHypocenter: "テスト震源",
       quakeTestScale: 55,
       quakeTestAreaCount: 3,
+      warningTestAreaCode: "",
+      warningTestHeadline: "（テスト）大雨警報が発表されました。土砂災害に警戒してください。",
+      announcements: [],
+      announcementsLoaded: false,
+      announcementsLoading: false,
+      announcementsError: "",
+      announcementSending: false,
     };
 
     const overlay = document.createElement("div");
@@ -4531,9 +6404,11 @@
         <div class="tabs">
           <button type="button" data-tab="stats" class="active">統計</button>
           <button type="button" data-tab="posts">投稿</button>
+          <button type="button" data-tab="announcements">お知らせ</button>
           <button type="button" data-tab="ads">広告</button>
           <button type="button" data-tab="users">ユーザー</button>
           <button type="button" data-tab="quake">地震速報</button>
+          <button type="button" data-tab="warning">気象警報</button>
         </div>
         <div id="admin-content"></div>
       </div>
@@ -4549,10 +6424,12 @@
       overlay.querySelectorAll(".tabs button").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.tab === tab);
       });
-      if (tab === "stats") { renderStatsTab(); if (!adminState.stats) loadStats(); }
+      if (tab === "stats") { renderStatsTab(); if (!adminState.stats) loadStats(); if (!adminState.postsSeries) loadPostsSeries(); }
       else if (tab === "posts") { renderPostsTab(); if (!adminState.posts.length) loadPosts(); }
+      else if (tab === "announcements") { renderAnnouncementsTab(); if (!adminState.announcementsLoaded) loadAnnouncements(); }
       else if (tab === "ads") { renderAdsTab(); if (!adminState.adsLoaded) loadAds(); }
       else if (tab === "quake") { renderQuakeTestTab(); }
+      else if (tab === "warning") { renderWarningTestTab(); if (!state.warningAlert.areas) loadWarningAreas().then(renderWarningTestTab); }
       else { renderUsersTab(); if (!adminState.users.length) loadUsers(); }
     }
 
@@ -4573,6 +6450,98 @@
         adminState.statsLoading = false;
         renderStatsTab();
       }
+    }
+
+    async function loadPostsSeries() {
+      adminState.postsSeriesLoading = true;
+      adminState.postsSeriesError = "";
+      renderStatsTab();
+      try {
+        // 日別は短い期間だと傾向が見えにくいので直近30日、週別/月別は12点。
+        const periods = adminState.postsSeriesGranularity === "day" ? 30 : 12;
+        adminState.postsSeries = await api(
+          `/api/admin/stats/posts-timeseries?granularity=${adminState.postsSeriesGranularity}&periods=${periods}`
+        );
+      } catch (err) {
+        adminState.postsSeriesError = err.message;
+      } finally {
+        adminState.postsSeriesLoading = false;
+        renderStatsTab();
+      }
+    }
+
+    function setPostsSeriesGranularity(granularity) {
+      if (adminState.postsSeriesGranularity === granularity) return;
+      adminState.postsSeriesGranularity = granularity;
+      adminState.postsSeries = null; // force a refetch for the new bucketing
+      loadPostsSeries();
+    }
+
+    // 依存ライブラリを増やしたくないので、SVGを直接組み立てるだけの
+    // 軽量な折れ線グラフ。データ点は最大12個程度の想定で、ツールチップは
+    // 各点に<title>を仕込むことでブラウザ標準のホバー表示に任せている。
+    function renderPostsLineChart(payload, granularity) {
+      const series = (payload && payload.series) || [];
+      if (!series.length) return `<p class="admin-empty">データがありません</p>`;
+
+      const width = 600;
+      const height = 200;
+      const padTop = 16;
+      const padBottom = 28;
+      const padX = 8;
+      const maxCount = Math.max(1, ...series.map((p) => p.count));
+      const plotHeight = height - padTop - padBottom;
+      const stepX = series.length > 1 ? (width - padX * 2) / (series.length - 1) : 0;
+
+      const xAt = (i) => padX + stepX * i;
+      const yAt = (c) => padTop + plotHeight - (c / maxCount) * plotHeight;
+
+      const points = series.map((p, i) => ({ ...p, x: xAt(i), y: yAt(p.count) }));
+      const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+      const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${(height - padBottom).toFixed(1)} `
+        + `L${points[0].x.toFixed(1)},${(height - padBottom).toFixed(1)} Z`;
+
+      // Grid lines + count labels at 0 / half / max.
+      const gridLevels = [0, 0.5, 1];
+      const gridLines = gridLevels.map((f) => {
+        const y = padTop + plotHeight - f * plotHeight;
+        return `
+          <line x1="${padX}" y1="${y.toFixed(1)}" x2="${width - padX}" y2="${y.toFixed(1)}" class="admin-linechart-grid" />
+          <text x="0" y="${(y + 3).toFixed(1)}" class="admin-linechart-axis-label">${Math.round(f * maxCount)}</text>
+        `;
+      }).join("");
+
+      // Avoid crowding the x-axis when there are many points — thin the
+      // labels out but always keep the first and last.
+      const labelEvery = series.length > 20 ? 5 : series.length > 8 ? 2 : 1;
+      const formatLabel = (period) => {
+        if (granularity === "month") {
+          const [y, m] = period.split("-");
+          return `${y.slice(2)}/${m}`;
+        }
+        const [, m, d] = period.split("-");
+        return `${Number(m)}/${Number(d)}`;
+      };
+      const xLabels = points.map((p, i) => {
+        if (i % labelEvery !== 0 && i !== points.length - 1) return "";
+        return `<text x="${p.x.toFixed(1)}" y="${height - 8}" class="admin-linechart-axis-label" text-anchor="middle">${escapeHtml(formatLabel(p.period))}</text>`;
+      }).join("");
+
+      const dots = points.map((p) => `
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" class="admin-linechart-dot">
+          <title>${escapeHtml(formatLabel(p.period))}: ${p.count}件</title>
+        </circle>
+      `).join("");
+
+      return `
+        <svg viewBox="0 0 ${width} ${height}" class="admin-linechart" preserveAspectRatio="none" role="img" aria-label="投稿数の推移">
+          ${gridLines}
+          <path d="${areaPath}" class="admin-linechart-area" />
+          <path d="${linePath}" class="admin-linechart-line" />
+          ${dots}
+          ${xLabels}
+        </svg>
+      `;
     }
 
     function statCard(label, value) {
@@ -4605,6 +6574,13 @@
           </div>`;
       }).join("");
 
+      const g = adminState.postsSeriesGranularity;
+      const seriesBody = adminState.postsSeriesError
+        ? `<div class="error-banner">${escapeHtml(adminState.postsSeriesError)}</div>`
+        : adminState.postsSeriesLoading && !adminState.postsSeries
+          ? `<div class="spinner-row">読み込み中...</div>`
+          : renderPostsLineChart(adminState.postsSeries, g);
+
       contentEl.innerHTML = `
         <div class="admin-stat-grid">
           ${statCard("ユーザー", t.users)}
@@ -4621,9 +6597,25 @@
           ${statCard("新規ユーザー", s.last7Days.newUsers)}
           ${statCard("新規投稿", s.last7Days.newPosts)}
         </div>
+        <div class="admin-section-title-row">
+          <h3 class="admin-section-title" style="margin:0;">投稿数の推移</h3>
+          <div class="admin-toggle-group" id="admin-posts-series-toggle">
+            <button type="button" data-granularity="day" class="${g === "day" ? "active" : ""}">日別</button>
+            <button type="button" data-granularity="week" class="${g === "week" ? "active" : ""}">週別</button>
+            <button type="button" data-granularity="month" class="${g === "month" ? "active" : ""}">月別</button>
+          </div>
+        </div>
+        <div class="admin-linechart-wrap">${seriesBody}</div>
         <h3 class="admin-section-title">投稿タイプ別</h3>
         <div class="admin-bar-chart">${typeRows || `<p class="admin-empty">データがありません</p>`}</div>
       `;
+
+      const toggle = contentEl.querySelector("#admin-posts-series-toggle");
+      if (toggle) {
+        toggle.querySelectorAll("button").forEach((btn) => {
+          btn.addEventListener("click", () => setPostsSeriesGranularity(btn.dataset.granularity));
+        });
+      }
     }
 
     // ---------------- posts tab ----------------
@@ -4709,6 +6701,93 @@
       });
       contentEl.querySelectorAll(".admin-delete-post-btn").forEach((btn) => {
         btn.addEventListener("click", () => deleteAdminPost(btn.dataset.id));
+      });
+    }
+
+    // ---------------- announcements tab (運営からのメッセージ) ----------------
+    async function loadAnnouncements() {
+      adminState.announcementsLoading = true;
+      adminState.announcementsError = "";
+      renderAnnouncementsTab();
+      try {
+        const { announcements } = await api("/api/admin/announcements");
+        adminState.announcements = announcements;
+        adminState.announcementsLoaded = true;
+      } catch (err) {
+        adminState.announcementsError = err.message;
+      } finally {
+        adminState.announcementsLoading = false;
+        renderAnnouncementsTab();
+      }
+    }
+
+    async function deleteAdminAnnouncement(id) {
+      if (!confirm("このお知らせを削除しますか？(すでに届いた通知/バナー自体は取り消せません)")) return;
+      try {
+        await api(`/api/admin/announcements/${id}`, { method: "DELETE" });
+        adminState.announcements = adminState.announcements.filter((a) => a.id !== id);
+        renderAnnouncementsTab();
+      } catch (err) {
+        toast(err.message);
+      }
+    }
+
+    const ANNOUNCEMENT_MESSAGE_MAX_LEN = 500;
+
+    function renderAnnouncementsTab() {
+      if (adminState.tab !== "announcements") return;
+      const rows = adminState.announcements.map((a) => `
+        <div class="admin-list-row">
+          <div class="admin-list-main">
+            <div class="admin-list-sub">${escapeHtml(a.message)}</div>
+            <div class="admin-list-meta">${escapeHtml(a.authorCallsign)} ・ ${fmtTime(a.createdAt)}</div>
+          </div>
+          <button type="button" class="btn btn-danger admin-delete-announcement-btn" data-id="${a.id}" style="padding:6px 12px; font-size:12px;">削除</button>
+        </div>
+      `).join("");
+
+      contentEl.innerHTML = `
+        <p class="admin-ads-hint">ここで送信すると、今開いている全ユーザーの画面に即座にバナーで表示され、タブを閉じているユーザーにもプッシュ通知が届きます(通知設定に関わらず全員へ送信されます)。</p>
+        ${adminState.announcementsError ? `<div class="error-banner">${escapeHtml(adminState.announcementsError)}</div>` : ""}
+        <form id="admin-announcement-form">
+          <div class="field">
+            <label>メッセージ</label>
+            <textarea id="admin-announcement-message" rows="4" maxlength="${ANNOUNCEMENT_MESSAGE_MAX_LEN}" placeholder="例: 本日23時よりメンテナンスのため一時的にご利用いただけません。"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary" id="admin-announcement-send" ${adminState.announcementSending ? "disabled" : ""}>
+            ${adminState.announcementSending ? "送信中..." : "全員に送信"}
+          </button>
+        </form>
+        <h4 style="margin:22px 0 10px; font-size:14px;">送信履歴</h4>
+        <div class="admin-list">
+          ${adminState.announcementsLoading ? `<div class="spinner-row">読み込み中...</div>` : ""}
+          ${!adminState.announcementsLoading && !rows ? `<p class="admin-empty">まだお知らせを送信していません</p>` : rows}
+        </div>
+      `;
+
+      document.getElementById("admin-announcement-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const textarea = document.getElementById("admin-announcement-message");
+        const message = textarea.value.trim();
+        if (!message) return;
+        adminState.announcementSending = true;
+        renderAnnouncementsTab();
+        try {
+          const { announcement } = await api("/api/admin/announcements", {
+            method: "POST",
+            body: JSON.stringify({ message }),
+          });
+          adminState.announcements.unshift(announcement);
+          toast("お知らせを送信しました");
+        } catch (err) {
+          toast(err.message);
+        } finally {
+          adminState.announcementSending = false;
+          renderAnnouncementsTab();
+        }
+      });
+      contentEl.querySelectorAll(".admin-delete-announcement-btn").forEach((btn) => {
+        btn.addEventListener("click", () => deleteAdminAnnouncement(btn.dataset.id));
       });
     }
 
@@ -4844,6 +6923,51 @@
       });
       document.getElementById("admin-quake-test-cancelled").addEventListener("click", () => {
         showEewPopup({ isTest: true, cancelled: true });
+      });
+    }
+
+    // ---------------- weather warning test tab ----------------
+    // 地震速報のテストタブと同じ方針: サーバーには一切ラウンドトリップ
+    // せず、このブラウザでshowWarningBar()を直接呼んで見た目だけ試す。
+    // 実際のユーザーへ本物のpush通知は一切送らない。
+    function renderWarningTestTab() {
+      if (adminState.tab !== "warning") return;
+
+      const areas = state.warningAlert.areas || [];
+      const options = areas
+        .map((a) => `<option value="${a.code}" ${a.code === adminState.warningTestAreaCode ? "selected" : ""}>${escapeHtml(a.name)}</option>`)
+        .join("");
+
+      contentEl.innerHTML = `
+        <p class="admin-ads-hint">気象警報・注意報の上部スライドインバナーを、実際の配信を待たずにこの画面から試せます。表示されるのはテスト配信バッジ付きのバナーのみで、実際のユーザーには一切通知が送られません。</p>
+        <form id="admin-warning-test-form">
+          <div class="field">
+            <label>地域</label>
+            <select id="admin-warning-test-area">
+              <option value="">選択...</option>
+              ${options}
+            </select>
+          </div>
+          <div class="field">
+            <label>見出し文</label>
+            <textarea id="admin-warning-test-headline" rows="3" maxlength="200">${escapeHtml(adminState.warningTestHeadline)}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">バナーを表示</button>
+        </form>
+      `;
+
+      document.getElementById("admin-warning-test-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const areaCode = document.getElementById("admin-warning-test-area").value;
+        adminState.warningTestAreaCode = areaCode;
+        adminState.warningTestHeadline = document.getElementById("admin-warning-test-headline").value.trim()
+          || "（テスト）大雨警報が発表されました。土砂災害に警戒してください。";
+        const area = areas.find((a) => a.code === areaCode);
+        showWarningBar({
+          isTest: true,
+          areaName: area ? area.name : "テスト地域",
+          headline: adminState.warningTestHeadline,
+        });
       });
     }
 

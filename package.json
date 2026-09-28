@@ -9,6 +9,7 @@
     "migrate": "node scripts/migrate.js",
     "bridge": "node scripts/fsa-to-aerosocial-bridge.js",
     "eew-bridge": "node scripts/eew-push-bridge.js",
+    "weather-warning-bridge": "node scripts/weather-warning-push-bridge.js",
     "resolve-fsa-pilot-id": "node scripts/resolve-fsa-pilot-id.js"
   },
   "dependencies": {

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理者パネル - VTuber番組表</title>
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #10131A;
+    --panel: #1B2029;
+    --panel-raised: #212733;
+    --grid-line: #2A3040;
+    --text: #E8EAF0;
+    --text-muted: #8890A0;
+    --live: #FF3B30;
+    --upcoming: #FFB020;
+    --accent: #4C8DFF;
+    --font-head: "Zen Kaku Gothic New", sans-serif;
+    --font-mono: "JetBrains Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-head);
+    min-height: 100vh;
+  }
+  a { color: var(--accent); }
+  header.topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid var(--grid-line);
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  header.topbar h1 { font-size: 18px; margin: 0; }
+  header.topbar .back { font-size: 14px; text-decoration: none; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  .stat-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 28px; }
+  .stat-card {
+    background: var(--panel); border: 1px solid var(--grid-line);
+    border-radius: 12px; padding: 16px 20px; min-width: 150px; flex: 1;
+  }
+  .stat-card .label { font-size: 13px; color: var(--text-muted); }
+  .stat-card .value { font-family: var(--font-mono); font-size: 28px; font-weight: 700; margin-top: 4px; }
+
+  h2 { font-size: 15px; color: var(--text-muted); font-weight: 500; margin: 0 0 12px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; }
+  thead th {
+    text-align: left; font-size: 12px; color: var(--text-muted); font-weight: 500;
+    padding: 10px 14px; border-bottom: 1px solid var(--grid-line); background: var(--panel-raised);
+  }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--grid-line); font-size: 14px; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  .user-cell { display: flex; align-items: center; gap: 8px; }
+  .user-cell img { width: 28px; height: 28px; border-radius: 50%; }
+  .muted { color: var(--text-muted); font-size: 12px; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px;
+    background: rgba(76, 141, 255, 0.15); color: var(--accent); border: 1px solid rgba(76,141,255,0.4);
+  }
+  button.toggle-btn {
+    font-family: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--grid-line); background: var(--panel-raised); color: var(--text);
+    cursor: pointer;
+  }
+  button.toggle-btn.is-admin { border-color: var(--accent); color: var(--accent); }
+  button.toggle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #errorBox {
+    display: none; background: rgba(255,59,48,0.12); border: 1px solid var(--live);
+    color: var(--live); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px;
+  }
+  #loading { color: var(--text-muted); font-size: 14px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>🛠 管理者パネル</h1>
+  <a class="back" href="/">← 番組表に戻る</a>
+</header>
+
+<main>
+  <div id="errorBox"></div>
+  <p id="loading">読み込み中…</p>
+
+  <div id="content" style="display:none;">
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="label">登録ユーザー数</div>
+        <div class="value" id="statUsers">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">登録チャンネル数</div>
+        <div class="value" id="statChannels">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">管理者数</div>
+        <div class="value" id="statAdmins">-</div>
+      </div>
+    </div>
+
+    <h2>ユーザー一覧</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ユーザー</th>
+          <th>登録チャンネル数</th>
+          <th>登録日</th>
+          <th>管理者</th>
+        </tr>
+      </thead>
+      <tbody id="userTableBody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function showError(message) {
+  const box = document.getElementById('errorBox');
+  box.textContent = message;
+  box.style.display = 'block';
+}
+
+async function fetchJSON(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `リクエストに失敗しました (${res.status})`);
+  }
+  return res.json();
+}
+
+function renderStats(stats) {
+  document.getElementById('statUsers').textContent = stats.userCount;
+  document.getElementById('statChannels').textContent = stats.channelCount;
+  document.getElementById('statAdmins').textContent = stats.adminCount;
+}
+
+function renderUsers(users) {
+  const tbody = document.getElementById('userTableBody');
+  tbody.innerHTML = users.map((u) => `
+    <tr data-id="${u.id}">
+      <td>
+        <div class="user-cell">
+          ${u.avatar_url ? `<img src="${escapeHtml(u.avatar_url)}" alt="">` : ''}
+          <div>
+            <div>${escapeHtml(u.name || '(名前未設定)')}</div>
+            <div class="muted">${escapeHtml(u.email || '')}</div>
+          </div>
+          ${u.is_admin ? '<span class="badge">管理者</span>' : ''}
+        </div>
+      </td>
+      <td>${u.channel_count}</td>
+      <td class="muted">${escapeHtml(u.created_at || '')}</td>
+      <td>
+        <button class="toggle-btn ${u.is_admin ? 'is-admin' : ''}" data-current="${u.is_admin ? 1 : 0}">
+          ${u.is_admin ? '管理者を解除' : '管理者にする'}
+        </button>
+      </td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('button.toggle-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const tr = btn.closest('tr');
+      const id = tr.dataset.id;
+      const nextIsAdmin = btn.dataset.current !== '1';
+      btn.disabled = true;
+      try {
+        await fetchJSON(`/api/admin/users/${id}/admin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isAdmin: nextIsAdmin }),
+        });
+        await load();
+      } catch (err) {
+        showError(err.message);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function load() {
+  const [stats, users] = await Promise.all([
+    fetchJSON('/api/admin/stats'),
+    fetchJSON('/api/admin/users'),
+  ]);
+  renderStats(stats);
+  renderUsers(users);
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+}
+
+load().catch((err) => {
+  document.getElementById('loading').style.display = 'none';
+  showError(err.message);
+});
+</script>
+</body>
+</html>

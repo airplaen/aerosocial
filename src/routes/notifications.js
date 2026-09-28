@@ -66,6 +66,36 @@ router.post("/subscribe", requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/notifications/announcements?limit=50 — 運営からのメッセージ履歴
+// (管理者パネルの /api/admin/announcements と同じテーブルを読むだけの
+// 一般ユーザー向け版。管理者権限は不要 — ログインさえしていれば誰でも
+// 読める、DM風の「メッセージ」タブ表示用)。新着はWebSocketの
+// "announcement:new"(src/routes/admin.js参照)でリアルタイムに届くので、
+// ここは初回表示時の履歴取得のみを担う。
+router.get("/announcements", requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const result = await pool.query(
+      `SELECT a.*, u.callsign FROM announcements a
+       JOIN users u ON u.id = a.author_id
+       ORDER BY a.created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({
+      announcements: result.rows.map((row) => ({
+        id: row.id,
+        message: row.message,
+        authorCallsign: row.callsign,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "お知らせ履歴の取得に失敗しました。" });
+  }
+});
+
 // POST /api/notifications/unsubscribe  { endpoint }
 router.post("/unsubscribe", requireAuth, async (req, res) => {
   try {

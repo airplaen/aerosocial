@@ -23,7 +23,6 @@ const eventRoutes = require("./routes/events");
 const animeImageRoutes = require("./routes/animeImage");
 const newsRoutes = require("./routes/news");
 const memoRoutes = require("./routes/memos");
-const logbookRoutes = require("./routes/logbook");
 const { initWebSocket } = require("./ws");
 const { initDiscordBot } = require("./services/discordNotify");
 const { startNewsFeed } = require("./services/newsFeed");
@@ -53,7 +52,7 @@ app.use((_req, res, next) => {
 // icon, no console-visible app error). Uploaded post images served from
 // /uploads are same-origin ('self') and were never affected by this.
 // The directives are further widened to allow the Leaflet map library
-// (loaded from unpkg for the flight-detail route map) and the CARTO/
+// (loaded from unpkg for the flight-detail route map) and the
 // OpenStreetMap tile images it fetches.
 app.use(helmet({
   crossOriginResourcePolicy: false,
@@ -75,33 +74,30 @@ app.use(helmet({
       // Services script that renders the "Googleでログイン" button (see
       // setupGoogleSignIn in app.js).
       //
-      // The admin panel's 広告 tab (see openAdminPanelModal in app.js) lets
-      // an admin paste an arbitrary ad network's embed snippet. It's served
-      // inside its own document at GET /api/ads/frame (routes/ads.js) rather
-      // than injected into this page directly — see adSlotHtml in app.js for
-      // why: some networks (AdMax's own auto.js/t.js included) render
-      // themselves via document.write(), which this script-src's
-      // 'strict-dynamic' deliberately does not extend trust to (a
-      // parser-inserted script, which is what document.write produces,
-      // falls outside strict-dynamic's propagation by design — that carve-
-      // out is what stops strict-dynamic from being trivially bypassable),
-      // so no script-src change here could make that work on this document
-      // regardless of how the snippet gets inserted into it. AdMax's chain
-      // of DSP/SSP partner scripts (dmp.im-apps.net, sync.shinobi.jp,
-      // js.miyuki-web.net/<numbers that change per ad unit>, ...) then runs
-      // *inside that separate document*, which this app's CSP does not
-      // apply to at all (see /api/ads/frame) — nothing to allowlist here.
+      // The admin panel's 広告 tab (see openAdminPanelModal in app.js)
+      // lets an admin paste an arbitrary ad network's embed snippet, which
+      // is then injected verbatim into the feed for every visitor (see
+      // injectHtmlWithScripts / renderFeedList). AdMax's actual delivery
+      // script (auto.js / t.js) in turn dynamically loads scripts from a
+      // long, shifting chain of its own DSP/SSP partners (dmp.im-apps.net,
+      // sync.shinobi.jp, js.miyuki-web.net/<numbers that change per ad
+      // unit>, ...) — curating a domain allowlist for that is a losing
+      // game, the same problem img-src had above, but far riskier to solve
+      // the same way (`https:` in script-src would let literally any
+      // injected script tag anywhere on the page load and run arbitrary
+      // code — the exact thing CSP's script-src exists to prevent).
       //
-      // 'nonce'+'strict-dynamic' below still matters for this app's own
-      // script (app.js) and anything *it* legitimately inserts via normal
-      // DOM APIs elsewhere (non-ad dynamic content) — nonce'd via
-      // sendIndexHtml below, with 'strict-dynamic' extending that trust
-      // to whatever app.js itself creates via createElement/appendChild
-      // (not document.write) and transitively to whatever *that* loads in
-      // turn, regardless of domain. 'https:' and 'unsafe-inline' are
-      // ignored by any browser that understands 'strict-dynamic'/nonces;
-      // they're kept only as a fallback for older browsers that don't, so
-      // the app still works there (just without this extra XSS protection).
+      // Instead this uses a nonce + 'strict-dynamic': app.js is the only
+      // script directly trusted (via the nonce stamped into its <script>
+      // tag by sendIndexHtml below); 'strict-dynamic' then extends that
+      // trust to anything app.js itself creates via the DOM (see
+      // injectHtmlWithScripts), and transitively to whatever *that*
+      // script loads in turn — regardless of its domain — without ever
+      // needing to list ad-tech domains here. 'https:' and 'unsafe-inline'
+      // are ignored by any browser that understands 'strict-dynamic' /
+      // nonces; they're kept only as a fallback for older browsers that
+      // don't, so the app still works there (just without this extra XSS
+      // protection, same as before this change).
       "script-src": ["'self'", (_req, res) => `'nonce-${res.locals.cspNonce}'`, "'strict-dynamic'", "https:", "'unsafe-inline'"],
       // Without an explicit frame-src, helmet's default falls back to
       // default-src 'self', which silently blocks the YouTube embed iframe
@@ -111,10 +107,8 @@ app.use(helmet({
       // from whichever ad-tech domain won the auction — same "too many,
       // too shifting to allowlist" reasoning as img-src above; an iframe's
       // content is confined to its own origin regardless, so this is a
-      // comparable trade-off. 'self' additionally covers this app's own
-      // /api/ads/frame (routes/ads.js) — the iframe that renders the admin's
-      // ad snippet in its own, CSP-free document (see adSlotHtml in app.js).
-      "frame-src": ["'self'", "https://www.youtube.com", "https://accounts.google.com", "https:"],
+      // comparable trade-off.
+      "frame-src": ["https://www.youtube.com", "https://accounts.google.com", "https:"],
       // IMPORTANT: helmet's default style-src is ["'self'", "https:", "'unsafe-inline'"]
       // — the app renders lots of literal style="..." attributes in its HTML
       // strings (e.g. flightCardHtml, avatarHtml), which need 'unsafe-inline'.
@@ -184,7 +178,6 @@ app.use("/api/youtube", youtubeLimiter, youtubeRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/memos", memoRoutes);
-app.use("/api/logbook", logbookRoutes);
 
 // アニメの紹介画像(Wikipediaに無い場合のフォールバック)をJikan API
 // (MyAnimeList)から取ってくるプロキシ。Weather/YouTubeと同じく外部APIを

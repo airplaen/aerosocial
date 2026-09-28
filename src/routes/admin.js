@@ -1,5 +1,6 @@
 const express = require("express");
 const fs = require("fs");
+const crypto = require("crypto");
 const pool = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requireAdmin } = require("../middleware/requireAdmin");
@@ -75,6 +76,88 @@ router.get("/stats", async (_req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "統計の取得に失敗しました。" });
+  }
+});
+
+// GET /api/admin/stats/posts-timeseries?granularity=day|week|month&periods=12
+// Post counts bucketed by day, week, or month, zero-filled so the line
+// graph on the admin stats tab doesn't show gaps for quiet periods. Weeks
+// are Monday-start (date(..., 'weekday 0', '-6 days') is the standard
+// SQLite recipe: jump forward to the next Sunday, then back 6 days — this
+// lands on the same Monday regardless of which day of the week
+// `created_at` is).
+router.get("/stats/posts-timeseries", async (req, res) => {
+  try {
+    const granularity = ["day", "month"].includes(req.query.granularity) ? req.query.granularity : "week";
+    const periods = Math.min(Math.max(Number(req.query.periods) || 12, 2), 90);
+
+    if (granularity === "day") {
+      const rows = await pool.query(
+        `SELECT date(created_at) AS period, COUNT(*) AS c
+         FROM posts
+         WHERE created_at >= date('now', '-${periods - 1} days')
+         GROUP BY period
+         ORDER BY period ASC`
+      );
+      const counts = Object.fromEntries(rows.rows.map((r) => [r.period, Number(r.c)]));
+      const series = [];
+      const cursor = new Date();
+      cursor.setUTCHours(0, 0, 0, 0);
+      cursor.setUTCDate(cursor.getUTCDate() - (periods - 1));
+      for (let i = 0; i < periods; i++) {
+        const key = cursor.toISOString().slice(0, 10); // YYYY-MM-DD
+        series.push({ period: key, count: counts[key] || 0 });
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+      return res.json({ granularity, series });
+    }
+
+    if (granularity === "month") {
+      const rows = await pool.query(
+        `SELECT strftime('%Y-%m', created_at) AS period, COUNT(*) AS c
+         FROM posts
+         WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', 'start of month', '-${periods - 1} months')
+         GROUP BY period
+         ORDER BY period ASC`
+      );
+      const counts = Object.fromEntries(rows.rows.map((r) => [r.period, Number(r.c)]));
+      const series = [];
+      const cursor = new Date();
+      cursor.setUTCDate(1);
+      cursor.setUTCMonth(cursor.getUTCMonth() - (periods - 1));
+      for (let i = 0; i < periods; i++) {
+        const key = cursor.toISOString().slice(0, 7); // YYYY-MM
+        series.push({ period: key, count: counts[key] || 0 });
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      }
+      return res.json({ granularity, series });
+    }
+
+    const rows = await pool.query(
+      `SELECT date(created_at, 'weekday 0', '-6 days') AS period, COUNT(*) AS c
+       FROM posts
+       WHERE created_at >= date('now', 'weekday 0', '-6 days', '-${(periods - 1) * 7} days')
+       GROUP BY period
+       ORDER BY period ASC`
+    );
+    const counts = Object.fromEntries(rows.rows.map((r) => [r.period, Number(r.c)]));
+    const series = [];
+    // Same Monday-of-this-week anchor as the SQL above, computed in JS so
+    // the zero-filled keys line up exactly with what the query produced.
+    const today = new Date();
+    const dow = today.getUTCDay(); // 0=Sun..6=Sat
+    const daysSinceMonday = (dow + 6) % 7;
+    const monday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - daysSinceMonday));
+    monday.setUTCDate(monday.getUTCDate() - (periods - 1) * 7);
+    for (let i = 0; i < periods; i++) {
+      const key = monday.toISOString().slice(0, 10); // YYYY-MM-DD (Monday)
+      series.push({ period: key, count: counts[key] || 0 });
+      monday.setUTCDate(monday.getUTCDate() + 7);
+    }
+    res.json({ granularity, series });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "投稿数の推移取得に失敗しました。" });
   }
 });
 
@@ -318,6 +401,96 @@ router.put("/ads", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "広告設定の保存に失敗しました。" });
+  }
+});
+
+// ---------------------------------------------------------------- 運営からのメッセージ (一斉配信お知らせ)
+// 管理者が書いた1件のメッセージを、開いている全ユーザーへWebSocketで
+// 即時配信し(handleWsMessageの"announcement:new" — 画面上部にバナー表示)、
+// さらにプッシュ通知(タブを閉じている/バックグラウンドのユーザー向け)も
+// 送る。既読管理などは持たず、送信した瞬間に「今見ている全員」へ届く
+// 一過性の速報という位置づけ(気象警報バナーと同じ設計)。
+const ANNOUNCEMENT_MESSAGE_MAX_LEN = 500;
+
+function announcementView(row) {
+  return {
+    id: row.id,
+    message: row.message,
+    authorCallsign: row.callsign,
+    createdAt: row.created_at,
+  };
+}
+
+// GET /api/admin/announcements?limit=20 — 送信履歴(管理者パネル用)
+router.get("/announcements", async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const result = await pool.query(
+      `SELECT a.*, u.callsign FROM announcements a
+       JOIN users u ON u.id = a.author_id
+       ORDER BY a.created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({ announcements: result.rows.map(announcementView) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "お知らせ履歴の取得に失敗しました。" });
+  }
+});
+
+// POST /api/admin/announcements   { message }
+router.post("/announcements", async (req, res) => {
+  try {
+    const message = String(req.body.message || "").trim();
+    if (!message) return res.status(400).json({ error: "メッセージを入力してください。" });
+    if (message.length > ANNOUNCEMENT_MESSAGE_MAX_LEN) {
+      return res.status(400).json({ error: `メッセージは${ANNOUNCEMENT_MESSAGE_MAX_LEN}文字以内で入力してください。` });
+    }
+
+    const id = crypto.randomUUID();
+    await pool.query(
+      "INSERT INTO announcements (id, author_id, message) VALUES ($1, $2, $3)",
+      [id, req.user.id, message]
+    );
+
+    const result = await pool.query(
+      `SELECT a.*, u.callsign FROM announcements a
+       JOIN users u ON u.id = a.author_id
+       WHERE a.id = $1`,
+      [id]
+    );
+    const announcement = announcementView(result.rows[0]);
+
+    // 開いているタブへは即時にWSで(handleWsMessage参照)。
+    broadcast("announcement:new", announcement);
+
+    // 閉じている/バックグラウンドのユーザーへはプッシュ通知で。管理者
+    // 自身には送らない(pushToAllのexcludeUserId)。失敗しても配信自体は
+    // 成功しているので、POST自体は失敗させない。
+    push.pushToAll(
+      { type: "announcement", title: "運営からのお知らせ", body: message.slice(0, 120), url: "/" },
+      req.user.id
+    ).catch((err) => console.error("announcement push failed:", err));
+
+    res.status(201).json({ announcement });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "お知らせの送信に失敗しました。" });
+  }
+});
+
+// DELETE /api/admin/announcements/:id
+// 送信取り消し。すでに配信済みの通知/バナー自体は撤回できないが、
+// 履歴一覧・管理者パネルからは消える(誤送信の記録を残さないため)。
+router.delete("/announcements/:id", async (req, res) => {
+  try {
+    const result = await pool.query("DELETE FROM announcements WHERE id = $1", [req.params.id]);
+    if (!result.rowCount) return res.status(404).json({ error: "お知らせが見つかりません。" });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "お知らせの削除に失敗しました。" });
   }
 });
 

@@ -5,6 +5,8 @@ const pool = require("../db");
 const { requireAuth, optionalAuth } = require("../middleware/auth");
 const upload = require("../middleware/upload");
 const push = require("../lib/push");
+const flightStats = require("../flightStats");
+const { computeAchievements } = require("../achievements");
 
 const router = express.Router();
 
@@ -283,6 +285,61 @@ router.get("/:callsign/following", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "フォロー中一覧の取得に失敗しました。" });
+  }
+});
+
+// GET /api/users/:callsign/logbook
+// Flight-history aggregates for the logbook page: monthly totals (last 12
+// months, zero-filled), per-aircraft breakdown, every airport visited
+// (top 50 by visit count — see flightStats.getAirports for why the full
+// list isn't returned here), and the most recent flights. All derived
+// straight from `posts` (see flightStats.js) — nothing new to store.
+router.get("/:callsign/logbook", async (req, res) => {
+  try {
+    const cs = req.params.callsign.toUpperCase();
+    const targetResult = await pool.query("SELECT id FROM users WHERE callsign = $1", [cs]);
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "パイロットが見つかりません。" });
+
+    const [totals, monthly, aircraft, airports, recentFlights] = await Promise.all([
+      flightStats.getTotals(target.id),
+      flightStats.getMonthly(target.id, 12),
+      flightStats.getAircraftBreakdown(target.id, 20),
+      flightStats.getAirports(target.id),
+      flightStats.getRecentFlights(target.id, 10),
+    ]);
+
+    res.json({
+      totals,
+      monthly,
+      aircraft,
+      airports: airports.slice(0, 50),
+      airportCount: airports.length,
+      recentFlights,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "ログブックの取得に失敗しました。" });
+  }
+});
+
+// GET /api/users/:callsign/achievements
+router.get("/:callsign/achievements", async (req, res) => {
+  try {
+    const cs = req.params.callsign.toUpperCase();
+    const targetResult = await pool.query("SELECT id FROM users WHERE callsign = $1", [cs]);
+    const target = targetResult.rows[0];
+    if (!target) return res.status(404).json({ error: "パイロットが見つかりません。" });
+
+    const [totals, airports] = await Promise.all([
+      flightStats.getTotals(target.id),
+      flightStats.getAirports(target.id),
+    ]);
+
+    res.json(computeAchievements({ totals, airports }));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "実績の取得に失敗しました。" });
   }
 });
 

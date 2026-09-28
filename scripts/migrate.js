@@ -298,6 +298,63 @@ function main() {
   db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC)");
   console.log("Ensured news_items table exists.");
 
+  // --- 気象警報・注意報 (地震情報パネル下部) --------------------------
+  // ユーザーが選んだ地域(気象庁の府県予報区コード)。null = 未選択/機能
+  // オフ。scripts/weather-warning-push-bridge.js がこの列を持つユーザー
+  // だけを対象に、選んだ地域の警報・注意報が更新されていないか定期的に
+  // チェックする。avatar_path/google_id/notify_pref と同じ
+  // add-column-if-missing パターン。
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN warning_area_code TEXT");
+    console.log("Added warning_area_code column to users.");
+  } catch (err) {
+    if (!/duplicate column/i.test(err.message)) throw err;
+  }
+
+  // --- メモ(ニーボード)機能: 手書き+テキスト -----------------------
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // other feature tables: guarantees this exists regardless of whether the
+  // first db.exec(sql) aborted partway through. Harmless no-op if
+  // schema.sql already created it. See src/routes/memos.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memos (
+      id           TEXT PRIMARY KEY,
+      user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title        TEXT NOT NULL DEFAULT '無題のメモ',
+      text_content TEXT NOT NULL DEFAULT '',
+      drawing_data TEXT,
+      created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memos_user_updated ON memos (user_id, updated_at DESC)");
+  console.log("Ensured memos table exists.");
+
+  // --- ログブック/実績/ランキング機能 ---------------------------------
+  // 新しいテーブルは無い(posts.flightから都度集計 — src/flightStats.js,
+  // src/achievements.js, src/routes/logbook.js参照)が、author_id+type
+  // での絞り込みが増えるため専用インデックスだけ追加する。schema.sqlの
+  // 実行が途中で止まっていても(他のALTER修復パターンと同じ理由)確実に
+  // 作られるよう、ここでも明示的に再実行しておく。
+  db.exec("CREATE INDEX IF NOT EXISTS idx_posts_author_type ON posts (author_id, type)");
+  console.log("Ensured idx_posts_author_type index exists.");
+
+  // --- 運営からのメッセージ(一斉配信お知らせ) -------------------------
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // other feature tables: guarantees this exists regardless of whether the
+  // first db.exec(sql) aborted partway through. Harmless no-op if
+  // schema.sql already created it. See src/routes/admin.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS announcements (
+      id         TEXT PRIMARY KEY,
+      author_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message    TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements (created_at DESC)");
+  console.log("Ensured announcements table exists.");
+
   db.close();
   console.log("Done.");
 }

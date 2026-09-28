@@ -55,4 +55,17 @@ async function pushToUsers(userIds, payload, excludeUserId = null) {
   await Promise.all(result.rows.map((row) => sendToRow(row, payload)));
 }
 
-module.exports = { pushToUsers, enabled, PUBLIC_KEY };
+// Sends `payload` to every push subscription in the system, e.g. an
+// admin-broadcast announcement. `excludeUserId` skips one user's own
+// subscriptions (the admin who sent it, so they don't get pushed their own
+// announcement). No-ops silently if VAPID keys aren't configured.
+async function pushToAll(payload, excludeUserId = null) {
+  if (!enabled) return;
+  const query = excludeUserId
+    ? "SELECT * FROM push_subscriptions WHERE user_id != $1"
+    : "SELECT * FROM push_subscriptions";
+  const result = await pool.query(query, excludeUserId ? [excludeUserId] : []);
+  await Promise.all(result.rows.map((row) => sendToRow(row, payload)));
+}
+
+module.exports = { pushToUsers, pushToAll, enabled, PUBLIC_KEY };

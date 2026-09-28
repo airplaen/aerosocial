@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   google_id     TEXT UNIQUE,
   fsa_auto_post INTEGER NOT NULL DEFAULT 1,
+  warning_area_code TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -111,6 +112,9 @@ CREATE TABLE IF NOT EXISTS ad_settings (
 INSERT OR IGNORE INTO ad_settings (id) VALUES (1);
 
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts (created_at DESC);
+-- ログブック/実績/ランキング(flightStats.js, achievements.js,
+-- routes/logbook.js)が author_id + type='flight' で頻繁に絞り込むため。
+CREATE INDEX IF NOT EXISTS idx_posts_author_type ON posts (author_id, type);
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments (post_id);
 CREATE INDEX IF NOT EXISTS idx_likes_post ON likes (post_id);
 CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows (follower_id);
@@ -170,6 +174,35 @@ CREATE TABLE IF NOT EXISTS anime_image_cache (
 -- ポーリングして得た記事のキャッシュ兼配信元。id はAPITube側のid、無ければ
 -- 記事URLをそのまま使う (INSERT OR IGNOREでの重複防止キー) —
 -- see src/services/newsFeed.js.
+-- 手書き対応メモ(ニーボード)機能。VATSIMでのフライト中に使うことを想定し、
+-- テキストメモと手描きスケッチ(iPad Pencil等のポインタイベント経由で
+-- フロントが書き出すPNGのdata URL)を1件のメモに両方持てるようにしている。
+-- SimBriefから取得したフライト情報を本文に挿入するショートカットは
+-- フロント側(既存のGET /api/simbrief/:usernameを再利用)で提供する。
+-- see src/routes/memos.js.
+CREATE TABLE IF NOT EXISTS memos (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title        TEXT NOT NULL DEFAULT '無題のメモ',
+  text_content TEXT NOT NULL DEFAULT '',
+  drawing_data TEXT,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_memos_user_updated ON memos (user_id, updated_at DESC);
+
+-- 運営からのメッセージ(管理者パネルからの一斉配信お知らせ)。既読管理は
+-- 持たない — 送信時にWebSocket(announcement:new)とWeb Pushで即時配信
+-- される一過性の速報で、この表はその送信履歴(管理者パネル表示用)。
+-- see src/routes/admin.js.
+CREATE TABLE IF NOT EXISTS announcements (
+  id         TEXT PRIMARY KEY,
+  author_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  message    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS news_items (
   id           TEXT PRIMARY KEY,
   title        TEXT NOT NULL,

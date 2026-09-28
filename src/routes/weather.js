@@ -13,6 +13,8 @@
 //        予報をまとめて返す。
 const express = require("express");
 const router = express.Router();
+const pool = require("../db");
+const { requireAuth } = require("../middleware/auth");
 
 const OWM_API_KEY = process.env.OPENWEATHER_API_KEY;
 const GEO_URL = "https://api.openweathermap.org/geo/1.0/direct";
@@ -157,6 +159,50 @@ router.get("/summary", async (req, res) => {
     console.error("weather summary error:", err);
     res.status(502).json({ error: "天気情報の取得に失敗しました。時間をおいて再度お試しください。" });
   }
+});
+
+// ---- 気象警報・注意報 (気象庁 防災情報) ----
+// 実際の取得・解析ロジックは src/lib/weatherWarnings.js に集約している
+// (定期ポーリングして通知を送る scripts/weather-warning-push-bridge.js
+// とロジックを共有するため)。ここでは薄いHTTPハンドラのみ。
+const { WARNING_AREAS, WARNING_AREA_NAMES, fetchWarningSummary } = require("../lib/weatherWarnings");
+
+// GET /api/weather/warning-areas
+// 都道府県(北海道は地方単位)の選択肢一覧。フロントのプルダウン用。
+router.get("/warning-areas", (_req, res) => {
+  res.json({ areas: WARNING_AREAS });
+});
+
+// GET /api/weather/warnings?areaCode=130000
+router.get("/warnings", async (req, res) => {
+  const areaCode = String(req.query.areaCode || "");
+  const summary = await fetchWarningSummary(areaCode);
+  if (summary.invalidArea) return res.status(400).json({ error: "対応していない地域コードです。" });
+  if (summary.fetchError) console.error("weather warnings error:", summary.fetchErrorMessage);
+  res.json(summary);
+});
+
+// ---- 通知対象の地域 (ログイン中のユーザーのアカウントに保存) ----
+// フロントのプルダウン自体はログインなしでも使える(localStorageだけで
+// 動く)が、サーバー側からのpush通知/WS即時バーは「誰が、どの地域を
+// 見ているか」をサーバーが把握している必要があるため、ログイン中は
+// 選んだ地域をusers.warning_area_codeにも保存する。
+// scripts/weather-warning-push-bridge.jsがこの列を定期的に読む。
+
+// GET /api/weather/warning-subscription
+router.get("/warning-subscription", requireAuth, async (req, res) => {
+  const result = await pool.query("SELECT warning_area_code FROM users WHERE id = $1", [req.user.id]);
+  res.json({ areaCode: result.rows[0]?.warning_area_code || null });
+});
+
+// PUT /api/weather/warning-subscription   { areaCode: "130000" | null }
+router.put("/warning-subscription", requireAuth, async (req, res) => {
+  const areaCode = req.body.areaCode ? String(req.body.areaCode) : null;
+  if (areaCode && !WARNING_AREA_NAMES[areaCode]) {
+    return res.status(400).json({ error: "対応していない地域コードです。" });
+  }
+  await pool.query("UPDATE users SET warning_area_code = $1 WHERE id = $2", [areaCode, req.user.id]);
+  res.json({ areaCode });
 });
 
 module.exports = router;

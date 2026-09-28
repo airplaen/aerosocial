@@ -1,0 +1,598 @@
+:root {
+  --bg: #10131A;
+  --panel: #1B2029;
+  --panel-raised: #212733;
+  --grid-line: #2A3040;
+  --text: #E8EAF0;
+  --text-muted: #8890A0;
+  --live: #FF3B30;
+  --upcoming: #FFB020;
+  --offline-dot: #3A4150;
+  --font-head: "Zen Kaku Gothic New", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-head);
+  min-height: 100vh;
+}
+
+body {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+a { color: inherit; }
+
+.hidden { display: none !important; }
+
+/* ---- ヘッダー ---- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--grid-line);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 20;
+}
+
+.ident { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.ident h1 { font-size: 18px; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
+
+.ident-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 8px var(--live);
+  flex-shrink: 0;
+}
+.ident-dot.big { width: 22px; height: 22px; margin-bottom: 6px; }
+
+.topbar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+
+.notify-btn {
+  background: none; border: 1px solid var(--grid-line); color: var(--text-muted);
+  border-radius: 20px; padding: 6px 12px; font-family: var(--font-head); font-size: 12px;
+  cursor: pointer; white-space: nowrap;
+}
+.notify-btn:hover:not(:disabled) { border-color: var(--upcoming); color: var(--text); }
+.notify-btn:disabled { cursor: default; opacity: 0.7; }
+.notify-btn.granted { border-color: var(--upcoming); color: var(--upcoming); }
+a.notify-btn { text-decoration: none; display: inline-block; }
+
+.btn-small {
+  background: none; border: 1px solid var(--grid-line); color: var(--text-muted);
+  border-radius: 20px; padding: 5px 12px; font-family: var(--font-head); font-size: 12px;
+  cursor: pointer; white-space: nowrap;
+}
+.btn-small:hover { border-color: var(--upcoming); color: var(--text); }
+.btn-small.active { border-color: var(--live); color: var(--text); background: var(--panel-raised); }
+.btn-small:disabled { opacity: 0.6; cursor: default; }
+
+.epg-reload-icon { display: inline-block; }
+.spinning .epg-reload-icon { animation: epg-reload-spin 0.7s linear infinite; }
+@keyframes epg-reload-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.user-area { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.user-area img { width: 30px; height: 30px; border-radius: 50%; }
+.user-area button {
+  background: none; border: 1px solid var(--grid-line); color: var(--text-muted);
+  border-radius: 4px; padding: 6px 10px; font-family: var(--font-head); cursor: pointer;
+}
+.user-area button:hover { border-color: var(--text-muted); color: var(--text); }
+
+/* ---- ログインゲート ---- */
+.login-gate {
+  min-height: calc(100vh - 60px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.login-card {
+  max-width: 420px; text-align: center;
+  background: var(--panel); border: 1px solid var(--grid-line);
+  border-radius: 6px; padding: 36px 28px;
+}
+.login-card h2 { margin: 0 0 12px; font-size: 20px; }
+.login-card p { color: var(--text-muted); line-height: 1.7; font-size: 14px; }
+.login-card p.lead { margin-bottom: 20px; }
+
+.login-card .feature-list,
+.login-card .data-usage {
+  text-align: left;
+  background: var(--panel-raised);
+  border: 1px solid var(--grid-line);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.login-card .feature-list h3,
+.login-card .data-usage h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 700;
+}
+.login-card .feature-list ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+.login-card .data-usage p { font-size: 12px; margin: 0; line-height: 1.7; }
+
+.login-card .btn-primary { margin-top: 4px; }
+
+.login-card .legal-links {
+  margin: 16px 0 0;
+  font-size: 12px;
+}
+.login-card .legal-links a { color: var(--text-muted); text-decoration: underline; }
+.login-card .legal-links a:hover { color: var(--text); }
+
+.btn-primary {
+  display: inline-block;
+  background: var(--live); color: #fff; border: none;
+  padding: 10px 22px; border-radius: 4px; font-weight: 700;
+  font-family: var(--font-head); font-size: 14px; text-decoration: none;
+  cursor: pointer;
+}
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-ghost {
+  background: none; border: 1px solid var(--grid-line); color: var(--text-muted);
+  padding: 10px 18px; border-radius: 4px; font-family: var(--font-head); cursor: pointer;
+}
+
+/* ---- プレイヤー ---- */
+.app { max-width: 1440px; margin: 0 auto; padding: 20px; }
+
+.player-dock { margin-bottom: 28px; }
+
+.player-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--grid-line);
+}
+.player-frame iframe { width: 100% !important; height: 100% !important; border: 0; display: block; }
+
+.player-embed-wrap { position: absolute; inset: 0; }
+.player-embed-wrap iframe { width: 100% !important; height: 100% !important; border: 0; display: block; }
+
+.player-empty {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--text-muted); text-align: center; padding: 20px;
+}
+.player-empty p { margin: 4px 0; }
+.player-empty-sub { font-size: 12px; opacity: 0.7; }
+
+.player-status-label {
+  position: absolute; left: 10px; bottom: 10px; z-index: 6;
+  background: rgba(0, 0, 0, 0.65); color: #fff;
+  font-size: 12px; padding: 5px 10px; border-radius: 4px;
+  max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.channel-tabs {
+  display: flex; gap: 8px; margin-top: 10px; overflow-x: auto;
+  padding-bottom: 4px;
+}
+.channel-tab {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--grid-line);
+  border-radius: 20px; padding: 6px 14px 6px 6px;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  font-size: 13px; color: var(--text-muted);
+}
+.channel-tab img { width: 24px; height: 24px; border-radius: 50%; }
+.channel-tab .tally { width: 7px; height: 7px; border-radius: 50%; background: var(--offline-dot); }
+.channel-tab .tally.live { background: var(--live); box-shadow: 0 0 6px var(--live); }
+.channel-tab .tally.upcoming { background: var(--upcoming); }
+.channel-tab.active { border-color: var(--live); color: var(--text); background: var(--panel-raised); }
+.channel-tab.live.active { border-color: var(--live); }
+.channel-tab.offline.active { border-color: var(--grid-line); background: var(--panel-raised); }
+
+/* ---- 番組表(EPG: 時間軸を縦にしたレイアウト) ---- */
+:root {
+  --time-col-width: 56px;
+  --channel-col-width: 176px;
+  --epg-header-height: 64px;
+  --hour-height: 64px;
+}
+
+.epg-toolbar { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; gap: 12px; flex-wrap: wrap; }
+.epg-toolbar h2 { font-size: 15px; margin: 0; color: var(--text-muted); font-weight: 500; }
+.epg-toolbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.now-label { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+
+.epg-scroll {
+  border: 1px solid var(--grid-line);
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 62vh;
+  -webkit-overflow-scrolling: touch;
+  background: var(--panel);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- 見た目を整えたスクロールバー ---- */
+.epg-scroll,
+.epg-detail-content,
+.channel-tabs {
+  scrollbar-width: thin;
+  scrollbar-color: var(--upcoming) transparent;
+}
+.epg-scroll::-webkit-scrollbar,
+.epg-detail-content::-webkit-scrollbar,
+.channel-tabs::-webkit-scrollbar {
+  width: 10px;
+  height: 8px;
+}
+.epg-scroll::-webkit-scrollbar-track,
+.epg-detail-content::-webkit-scrollbar-track,
+.channel-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.epg-scroll::-webkit-scrollbar-thumb,
+.epg-detail-content::-webkit-scrollbar-thumb,
+.channel-tabs::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--upcoming), var(--live));
+  border-radius: 20px;
+  border: 2px solid var(--panel);
+  background-clip: padding-box;
+}
+.epg-scroll::-webkit-scrollbar-thumb:hover,
+.epg-detail-content::-webkit-scrollbar-thumb:hover,
+.channel-tabs::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--upcoming), #ff6a5f);
+  background-clip: padding-box;
+}
+.epg-scroll::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---- プレイヤーエリア + 詳細パネルの横並び ---- */
+.player-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.player-main { flex: 1 1 280px; min-width: 280px; }
+
+/* ---- 配信詳細パネル(番組表の枠をクリックすると、プレイヤーの横に表示) ---- */
+.epg-detail-panel {
+  flex-shrink: 0;
+  width: 0;
+  max-height: 480px;
+  overflow: hidden;
+  opacity: 0;
+  background: var(--panel);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0;
+  position: relative;
+  transition: width 0.22s ease, opacity 0.15s ease, padding 0.22s ease, border-color 0.22s ease;
+}
+.epg-detail-panel.open {
+  width: 360px;
+  opacity: 1;
+  padding: 16px 14px;
+  border-color: var(--grid-line);
+}
+
+.epg-detail-close {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; color: var(--text-muted);
+  font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 8px;
+  border-radius: 50%;
+}
+.epg-detail-close:hover { color: var(--text); background: var(--panel-raised); }
+
+.epg-detail-content {
+  max-height: 448px;
+  overflow-y: auto;
+  white-space: nowrap;
+}
+.epg-detail-panel.open .epg-detail-content { white-space: normal; }
+
+.epg-detail-placeholder {
+  color: var(--text-muted); font-size: 13px; line-height: 1.6; margin: 0;
+}
+
+.epg-detail-thumb-wrap { position: relative; margin: 0 0 12px; border-radius: 6px; overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+.epg-detail-thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.epg-detail-badge {
+  position: absolute; left: 8px; bottom: 8px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 3px; color: #fff;
+  background: var(--offline-dot);
+}
+.epg-detail-badge.live { background: var(--live); box-shadow: 0 0 8px var(--live); }
+.epg-detail-badge.upcoming { background: var(--upcoming); color: #10131A; }
+.epg-detail-badge.recorded { background: var(--text-muted); color: #10131A; }
+
+.epg-detail-channel { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--text-muted); }
+.epg-detail-channel img { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; }
+
+.epg-detail-title { margin: 0 0 6px; font-size: 15px; line-height: 1.4; }
+.epg-detail-time { margin: 0 0 12px; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+
+.epg-detail-desc-label { margin: 0 0 4px; font-size: 11px; color: var(--text-muted); font-weight: 700; }
+.epg-detail-desc {
+  margin: 0;
+  font-size: 12.5px; line-height: 1.7; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.epg-scroll-hint {
+  margin: 6px 2px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.epg-grid {
+  display: grid;
+  grid-template-columns: var(--time-col-width) 1fr;
+  grid-template-rows: var(--epg-header-height) 1fr;
+  min-width: max-content;
+}
+
+.epg-corner {
+  grid-column: 1; grid-row: 1;
+  position: sticky; top: 0; left: 0; z-index: 15;
+  background: var(--panel);
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+}
+
+.epg-col-headers {
+  grid-column: 2; grid-row: 1;
+  position: sticky; top: 0; z-index: 10;
+  background: var(--panel);
+  border-bottom: 1px solid var(--grid-line);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--channel-col-width);
+}
+
+.epg-col-header {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 6px 8px;
+  border-right: 1px solid var(--grid-line);
+  min-width: 0;
+  text-align: center;
+}
+.epg-col-header img { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; background: var(--grid-line); }
+.epg-col-header .ch-head-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.epg-col-header .ch-title {
+  font-size: 12px; font-weight: 500; max-width: 110px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.epg-col-header .tally-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--offline-dot); flex-shrink: 0; }
+.epg-col-header .tally-dot.live { background: var(--live); box-shadow: 0 0 6px var(--live); }
+.epg-col-header .tally-dot.upcoming { background: var(--upcoming); }
+.epg-col-header .remove-btn {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 14px; padding: 2px 6px;
+}
+.epg-col-header .remove-btn:hover { color: var(--live); }
+
+.epg-ruler-v {
+  grid-column: 1; grid-row: 2;
+  position: sticky; left: 0; z-index: 8;
+  background: var(--panel);
+  border-right: 1px solid var(--grid-line);
+  position: relative;
+}
+.epg-ruler-v.sticky-left { position: sticky; }
+.epg-ruler-v span {
+  position: absolute; left: 0; width: 100%;
+  display: flex; align-items: flex-start; justify-content: center;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  border-top: 1px solid var(--grid-line);
+  padding-top: 3px;
+}
+
+.epg-cols {
+  grid-column: 2; grid-row: 2;
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--channel-col-width);
+}
+
+@media (min-width: 900px) {
+  .epg-scroll-hint { opacity: 0.6; }
+}
+
+.epg-col-timeline {
+  position: relative;
+  border-right: 1px solid var(--grid-line);
+}
+
+.epg-block {
+  position: absolute; left: 4px; right: 4px; top: 0;
+  border-radius: 4px; padding: 4px 6px;
+  font-size: 11px; overflow: hidden;
+  cursor: pointer; min-height: 22px;
+  line-height: 1.3;
+}
+.epg-block.live {
+  background: rgba(255, 59, 48, 0.18); border: 1px solid var(--live); color: var(--text);
+  z-index: 2; box-shadow: 0 0 0 2px var(--panel);
+}
+.epg-block.upcoming {
+  background: rgba(255, 176, 32, 0.15); border: 1px dashed var(--upcoming); color: var(--text);
+  z-index: 2; box-shadow: 0 0 0 2px var(--panel);
+}
+.epg-block .block-badge {
+  font-family: var(--font-mono); font-weight: 600; font-size: 10px;
+  color: var(--live); display: block;
+}
+.epg-block.upcoming .block-badge { color: var(--upcoming); }
+.epg-block.recorded {
+  background: rgba(136, 144, 160, 0.10); border: 1px dashed var(--text-muted); color: var(--text-muted);
+}
+.epg-block.recorded .block-badge { color: var(--text-muted); }
+.epg-block.recorded:hover {
+  background: rgba(136, 144, 160, 0.2); border-color: var(--text);
+}
+.epg-block.recorded.now-playing {
+  background: rgba(255, 176, 32, 0.16); border: 1px solid var(--upcoming); color: var(--text);
+}
+.epg-block.recorded.now-playing .block-badge { color: var(--upcoming); }
+.epg-block[data-channel-id]:hover { filter: brightness(1.2); }
+.epg-block.no-past {
+  cursor: default; pointer-events: none;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: none; border: 1px dashed var(--grid-line); color: var(--text-muted);
+  font-size: 10.5px; line-height: 1.5; padding: 8px;
+}
+
+.now-line-v {
+  position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: var(--live); z-index: 4; pointer-events: none;
+}
+.now-line-v::before {
+  content: ''; position: absolute; left: -4px; top: -3px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--live);
+}
+
+.empty-hint { color: var(--text-muted); font-size: 13px; padding: 20px; }
+
+/* ---- サイドバー(大きく見る)レイアウト ---- */
+.app.layout-sidebar {
+  max-width: 1500px;
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  grid-template-rows: auto auto;
+  gap: 20px;
+  align-items: start;
+}
+.app.layout-sidebar .player-dock { grid-column: 1; grid-row: 1 / span 2; margin-bottom: 0; }
+.app.layout-sidebar .epg { grid-column: 2; grid-row: 1; min-width: 0; }
+.app.layout-sidebar .epg-scroll { max-height: 78vh; }
+.app.layout-sidebar {
+  --channel-col-width: 130px;
+}
+@media (max-width: 1000px) {
+  .app.layout-sidebar {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+  }
+  .app.layout-sidebar .player-dock { grid-column: 1; grid-row: 1; }
+  .app.layout-sidebar .epg { grid-column: 1; grid-row: 2; }
+  .app.layout-sidebar .epg-scroll { max-height: 50vh; }
+}
+
+/* ---- チャンネル追加 ---- */
+.fab {
+  position: fixed;
+  right: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--live); color: #fff; border: none;
+  font-size: 26px; line-height: 1; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  z-index: 30;
+}
+
+dialog#addChannelDialog {
+  border: 1px solid var(--grid-line); border-radius: 8px;
+  background: var(--panel); color: var(--text);
+  padding: 22px; width: min(420px, 90vw);
+}
+dialog#addChannelDialog::backdrop { background: rgba(0,0,0,0.6); }
+#addChannelForm h3 { margin: 0 0 6px; font-size: 16px; }
+.dialog-hint { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
+#addChannelInput {
+  width: 100%; padding: 10px; border-radius: 4px; border: 1px solid var(--grid-line);
+  background: var(--bg); color: var(--text); font-family: var(--font-head); font-size: 14px;
+}
+.dialog-error { color: var(--live); font-size: 12px; margin: 8px 0 0; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+/* ---- 配信詳細パネル: 画面が狭い場合はプレイヤーのすぐ下にインラインで表示する ---- */
+@media (max-width: 860px) {
+  .player-row {
+    flex-direction: column;
+    /* デスクトップの横並び用に align-items: flex-start にしていたが、
+       縦積みになるスマホ幅ではこれだと .player-main が中身(チャンネルタブの並び等)の
+       サイズにshrink-to-fitしてしまい、プレイヤーが画面幅を超えて広がってしまっていた。
+       縦積み時は stretch に戻して、幅いっぱいに広がるようにする */
+    align-items: stretch;
+  }
+  .player-main { width: 100%; }
+
+  /* 高さを大きな max-height でアニメーションさせる方式は、スマホのブラウザだと
+     中身(特に概要欄など後ろの要素)の高さ計算がずれて見切れてしまうことがあったため、
+     スマホでは display の切り替えだけにして確実に全部表示されるようにする
+     (アニメーションは無くなるが、見えなくなる方が問題なので優先) */
+  .epg-detail-panel {
+    display: none;
+    width: 100%;
+    max-height: none;
+    opacity: 1;
+    border-color: var(--grid-line);
+    margin-top: 14px;
+    transition: none;
+  }
+  .epg-detail-panel.open {
+    display: block;
+    width: 100%;
+  }
+  .epg-detail-content { max-height: none; }
+  .epg-detail-thumb-wrap { max-width: 320px; margin-left: auto; margin-right: auto; }
+}
+
+/* ---- レスポンシブ ---- */
+@media (max-width: 640px) {
+  :root {
+    --time-col-width: 42px;
+    --channel-col-width: 128px;
+    --epg-header-height: 54px;
+    --hour-height: 52px;
+  }
+  .epg-col-header .ch-title { max-width: 76px; font-size: 11px; }
+
+  .app { padding: 12px; }
+
+  .topbar { padding: 10px 12px; }
+  .ident h1 { font-size: 15px; }
+
+  /* 通知ON/OFF・テスト・インストールの各ボタンが並ぶと折り返しても窮屈なため、
+     文字サイズと余白を詰めてスマホ幅でも1〜2行に収まるようにする */
+  .topbar-actions { gap: 6px 8px; width: 100%; justify-content: flex-start; }
+  .notify-btn,
+  .btn-small { padding: 5px 9px; font-size: 11px; }
+
+  .user-area { gap: 6px; font-size: 12px; }
+  .user-area img { width: 24px; height: 24px; }
+  /* ユーザー名が長いとボタン列を圧迫して崩れるため、スマホ幅では非表示にしてアバターとログアウトのみ表示 */
+  .user-area span { display: none; }
+
+  .epg-toolbar { gap: 8px; }
+  .epg-scroll { max-height: 56vh; }
+
+  .fab { right: 16px; width: 48px; height: 48px; font-size: 22px; }
+
+  .player-status-label { font-size: 11px; left: 6px; bottom: 6px; }
+}

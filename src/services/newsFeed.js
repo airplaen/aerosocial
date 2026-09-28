@@ -99,25 +99,34 @@ function splitTitleAndSource(rawTitle, sourceFromTag) {
   return { title, source: sourceFromTag || "Google News" };
 }
 
-// --- タイトルからざっくりカテゴリを判定し、雰囲気写真のタグに変換 -----
+// --- タイトルからざっくりカテゴリを判定し、雰囲気写真のタグ + 表示用の
+// 日本語カテゴリ名に変換 -----
 // 上から順に判定して最初にマッチしたものを使う(複数キーワードを含む
 // タイトルでも一つに決め打ちでよい — 完璧な分類が目的ではなく、記事の
 // 空気感に近い写真が出れば十分なため)。どれにも当てはまらなければ
-// 汎用の "japan, newspaper" にフォールバックする。
+// 汎用の "japan, newspaper" / 「総合」にフォールバックする。
+// label はニュースハブのカテゴリータブ(public/app.js openNewsHubModal内)
+// で「すべて / 総合 / スポーツ / …」として使われる。
 const CATEGORY_RULES = [
-  { pattern: /(地震|津波|噴火|土砂|豪雨|台風|暴風|警報|避難)/, tags: ["disaster", "storm"] },
-  { pattern: /(天気|気象|猛暑|寒波|降雪|梅雨|気温)/, tags: ["weather", "sky"] },
-  { pattern: /(野球|サッカー|大谷|ワールドカップ|五輪|オリンピック|バスケ|ゴルフ|テニス|相撲|柔道|マラソン|Jリーグ|プロ野球)/, tags: ["sports", "stadium"] },
-  { pattern: /(株価|円安|円高|日銀|経済|金利|物価|インフレ|決算|株式|市場|投資)/, tags: ["business", "finance"] },
-  { pattern: /(選挙|国会|首相|大統領|政権|政府|外交|議員|与党|野党)/, tags: ["politics", "government"] },
-  { pattern: /(AI|人工知能|IT|半導体|スマホ|アプリ|テクノロジー|ロボット|宇宙|ロケット|サイバー)/, tags: ["technology", "computer"] },
-  { pattern: /(事件|逮捕|容疑|殺人|強盗|詐欺|裁判|警察)/, tags: ["crime", "police"] },
-  { pattern: /(事故|火災|衝突|転落|炎上)/, tags: ["accident", "emergency"] },
-  { pattern: /(映画|音楽|ドラマ|芸能|俳優|アイドル|ライブ|コンサート)/, tags: ["entertainment", "stage"] },
-  { pattern: /(病院|感染|ウイルス|コロナ|医療|健康|ワクチン)/, tags: ["health", "medical"] },
-  { pattern: /(学校|教育|受験|大学|入試)/, tags: ["education", "school"] },
-  { pattern: /(飛行機|空港|航空|鉄道|新幹線|列車|道路|高速道路|フライト)/, tags: ["aviation", "transportation"] },
+  { pattern: /(地震|津波|噴火|土砂|豪雨|台風|暴風|警報|避難)/, tags: ["disaster", "storm"], label: "災害・気象" },
+  { pattern: /(天気|気象|猛暑|寒波|降雪|梅雨|気温)/, tags: ["weather", "sky"], label: "災害・気象" },
+  { pattern: /(野球|サッカー|大谷|ワールドカップ|五輪|オリンピック|バスケ|ゴルフ|テニス|相撲|柔道|マラソン|Jリーグ|プロ野球)/, tags: ["sports", "stadium"], label: "スポーツ" },
+  { pattern: /(株価|円安|円高|日銀|経済|金利|物価|インフレ|決算|株式|市場|投資)/, tags: ["business", "finance"], label: "経済" },
+  { pattern: /(選挙|国会|首相|大統領|政権|政府|外交|議員|与党|野党)/, tags: ["politics", "government"], label: "政治" },
+  { pattern: /(AI|人工知能|IT|半導体|スマホ|アプリ|テクノロジー|ロボット|宇宙|ロケット|サイバー)/, tags: ["technology", "computer"], label: "テクノロジー" },
+  { pattern: /(事件|逮捕|容疑|殺人|強盗|詐欺|裁判|警察)/, tags: ["crime", "police"], label: "事件・司法" },
+  { pattern: /(事故|火災|衝突|転落|炎上)/, tags: ["accident", "emergency"], label: "事故" },
+  { pattern: /(映画|音楽|ドラマ|芸能|俳優|アイドル|ライブ|コンサート)/, tags: ["entertainment", "stage"], label: "エンタメ" },
+  { pattern: /(病院|感染|ウイルス|コロナ|医療|健康|ワクチン)/, tags: ["health", "medical"], label: "健康・医療" },
+  { pattern: /(学校|教育|受験|大学|入試)/, tags: ["education", "school"], label: "教育" },
+  { pattern: /(飛行機|空港|航空|鉄道|新幹線|列車|道路|高速道路|フライト)/, tags: ["aviation", "transportation"], label: "交通・航空" },
 ];
+const DEFAULT_CATEGORY_LABEL = "総合";
+
+function categorizeTitle(title) {
+  const rule = CATEGORY_RULES.find((r) => r.pattern.test(title));
+  return rule ? { tags: rule.tags, label: rule.label } : { tags: ["japan", "newspaper"], label: DEFAULT_CATEGORY_LABEL };
+}
 
 // 同じ記事なら(ページを再読み込みしても)毎回同じ写真になるよう、
 // idから決定的なロック番号を作る(LoremFlickrの?lockパラメータ用)。
@@ -129,9 +138,7 @@ function hashToPositiveInt(str) {
   return Math.abs(h) % 100000;
 }
 
-function buildStockImageUrl(title, id) {
-  const rule = CATEGORY_RULES.find((r) => r.pattern.test(title));
-  const tags = rule ? rule.tags : ["japan", "newspaper"];
+function buildStockImageUrl(tags, id) {
   const lock = hashToPositiveInt(id);
   return `https://loremflickr.com/640/360/${tags.map(encodeURIComponent).join(",")}?lock=${lock}`;
 }
@@ -160,14 +167,15 @@ function parseRssItems(xml) {
       if (!Number.isNaN(d.getTime())) publishedAt = d.toISOString();
     }
 
+    const { tags, label } = categorizeTitle(title);
     items.push({
       id,
       title,
       summary: descriptionRaw ? stripHtmlTags(descriptionRaw) : "",
       link,
       source,
-      category: null,
-      imageUrl: buildStockImageUrl(title, id),
+      category: label,
+      imageUrl: buildStockImageUrl(tags, id),
       isBreaking: false,
       publishedAt,
     });
@@ -252,9 +260,28 @@ async function pollOnce() {
   }
 }
 
+// カテゴリー分類(categorizeTitle)を後から追加したため、それ以前に保存
+// された既存記事は category が NULL のまま残っている。ニュースハブの
+// カテゴリータブ(public/app.js)が「未分類」だらけにならないよう、
+// 起動時に一度だけタイトルから再分類して埋める。
+function backfillMissingCategories() {
+  const rows = db.raw.prepare(`SELECT id, title FROM news_items WHERE category IS NULL`).all();
+  if (!rows.length) return;
+  const update = db.raw.prepare(`UPDATE news_items SET category = ? WHERE id = ?`);
+  const runAll = db.raw.transaction((items) => {
+    for (const row of items) {
+      const { label } = categorizeTitle(row.title);
+      update.run(label, row.id);
+    }
+  });
+  runAll(rows);
+  console.log(`[newsFeed] 既存記事${rows.length}件のカテゴリーを分類しました。`);
+}
+
 function startNewsFeed() {
   if (pollTimer) return; // 二重起動防止
   console.log(`[newsFeed] Google News RSS (${LANGUAGE_CODE}/${COUNTRY_CODE}) のポーリングを開始します（間隔: ${POLL_INTERVAL_MS}ms）。画像はLoremFlickrのカテゴリ別ストック写真を使用。`);
+  backfillMissingCategories();
   pollOnce();
   pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
 }

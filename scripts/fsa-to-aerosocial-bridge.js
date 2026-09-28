@@ -390,6 +390,33 @@ function missingRequiredFields(flight) {
   return REQUIRED_FOR_POST.filter((k) => flight[k] === undefined || flight[k] === null || flight[k] === "");
 }
 
+// セッションキーが「安定した」値として計算できるかどうかを判定する。
+// SESSION_KEY_CANDIDATESのいずれか、または出発地・到着地・コールサイン・
+// 機種のいずれか1つでも取得できていれば安定とみなす。これらが1つも
+// 無い場合、sessionKeyFor() は最終フォールバックの `t:${Date.now()}`
+// （呼ぶ度に値が変わる＝セッションキーとして機能しない値）を返すことになる。
+//
+// v3.2で追加: 機体が湧いた直後（flight_started受信直後）は、FSA側に
+// まだ出発地・到着地・コールサイン・機種のいずれも届いていないことがある。
+// この状態のまま投稿してしまうと、`t:${Date.now()}` が
+// postedSessions[pilotId] に保存され、その後（＝実際にコックピットに
+// 座って/プランがロードされてFSAの本データが揃った時点）に再度イベントが
+// 来た際は `flight:ORIGIN|DEST|CS|AC` という安定したキーが計算される。
+// これは直前に保存した `t:...` と一致しないため「別セッション」と
+// 判定され、二重投稿が起きていた。
+// これを防ぐため、識別情報が1つも揃っていない間は投稿自体を保留し、
+// データが揃ったイベントが来るまで待つ。
+function hasStableSessionIdentity(liveData) {
+  if (pick(liveData, SESSION_KEY_CANDIDATES) !== undefined) return true;
+  const stableParts = [
+    pick(liveData, FIELD_CANDIDATES.originIcao),
+    pick(liveData, FIELD_CANDIDATES.destIcao),
+    pick(liveData, FIELD_CANDIDATES.callsign),
+    pick(liveData, FIELD_CANDIDATES.aircraftIcao),
+  ];
+  return stableParts.some((p) => p !== undefined && p !== null && p !== "");
+}
+
 function sessionKeyFor(liveData) {
   const v = pick(liveData, SESSION_KEY_CANDIDATES);
   if (v !== undefined) return String(v);
@@ -541,6 +568,18 @@ async function maybePostForPilot(pilotId, entry) {
 
   try {
     const liveData = await fetchFsaLiveDetail(pilotId);
+
+    // 出発地・到着地・コールサイン・機種などの識別情報が1つも揃っていない
+    // 場合、sessionKeyFor() は不安定な `t:${Date.now()}` フォールバックしか
+    // 返せない。この状態で投稿すると、後から本データが揃った時点の投稿と
+    // セッションキーが一致せず二重投稿になるため、ここでは投稿せず次の
+    // イベント（snapshot/update）でデータが揃うのを待つ。
+    if (!hasStableSessionIdentity(liveData)) {
+      debugLog(`pilot_id=${pilotId}: フライトの識別情報（出発地/到着地/コールサイン/機種）がまだ揃っていないため投稿を保留します。`);
+      entry.posted = false; // 次のイベントで再試行できるようにする
+      return;
+    }
+
     // sessionKeyFor は常に文字列を返す（フォールバックの生成も内部で行う）
     const sessionKey = sessionKeyFor(liveData);
 

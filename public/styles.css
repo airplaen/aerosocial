@@ -31,6 +31,37 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
 }
 
+/* ---------- Light mode ----------
+   Every color in this file is driven by the tokens above, so a light theme
+   is just a second set of values for the same variable names — nothing
+   else has to know a "theme" exists. Toggled by setting
+   `data-theme="light"` on <html> (see the theme bootstrap script in
+   index.html and setTheme() in app.js); default with no attribute (or
+   `data-theme="dark"`) is the original dark palette above. */
+:root[data-theme="light"] {
+  --bg: #f4f5fa;
+  --panel: #ffffff;
+  --panel-2: #eef0f7;
+  --border: #dde1ee;
+  --text: #161a2b;
+  --text-dim: #656d87;
+  --accent: #2f7fe0;
+  --accent-2: #159a76;
+  --danger: #e2434f;
+  --accent-violet: #6a56e8;
+  --accent-gold: #e08a1e;
+  --accent-gold-2: #d4632e;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 12px 30px -18px rgba(30, 38, 64, 0.22);
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 20px 44px -20px rgba(30, 38, 64, 0.28);
+  --shadow-pop: 0 24px 60px -24px rgba(30, 38, 64, 0.35);
+  --ring: 0 0 0 1px rgba(47, 127, 224, 0.3), 0 0 0 4px rgba(47, 127, 224, 0.12);
+}
+:root[data-theme="light"] body::before {
+  /* Same decorative glows, toned down — at dark-mode strength these read
+     as dirty smudges on a white background instead of an ambient glow. */
+  opacity: 0.5;
+}
+
 html {
   background: var(--bg);
   /* Stops iOS/Android's rubber-band overscroll from revealing the
@@ -134,9 +165,6 @@ input, textarea {
     top: 78px; /* sits just below the sticky topbar */
   }
   .sidebar-left { flex-basis: 260px; }
-  .post-text a{
-    color: white;
-  }
 }
 
 /* ---------- Google Material Symbols icons ---------- */
@@ -178,7 +206,7 @@ input, textarea {
   height: 54px;
   padding-bottom: env(safe-area-inset-bottom, 0);
   /* Solid instead of blurred-translucent — see comment above .topbar for why. */
-  background: #05070d;
+  background: var(--bg);
   border-top: 1px solid var(--border);
   transform: translateZ(0);
   -webkit-backface-visibility: hidden;
@@ -211,6 +239,25 @@ input, textarea {
     "opsz" 24;
 }
 .mobile-tabbar .tab-btn:active { transform: scale(0.88); }
+
+/* Unread dot for the 地震情報 tab — see markQuakeUnseen() in app.js. The
+   eew-popup slide-in already announces a new alert, but it auto-hides
+   after a few seconds; this stays lit until the person actually opens
+   the quake sheet, so a missed popup doesn't mean a missed alert.
+   Anchored to the icon itself (not the button) so it sits at the same
+   spot regardless of how wide each flex:1 tab happens to be. */
+.mobile-tabbar .tab-btn .material-symbols-rounded { position: relative; }
+.mobile-tabbar .tab-btn.has-badge .material-symbols-rounded::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 2px solid var(--bg);
+}
 
 @media (min-width: 900px) {
   .mobile-tabbar { display: none; }
@@ -251,7 +298,10 @@ input, textarea {
    that badly — it shows up as scroll stutter plus a flicker between
    the blurred and unblurred state, which reads as the screen
    suddenly getting brighter. A solid background removes the blur
-   recompute entirely, at the cost of the frosted-glass look. */
+   recompute entirely, at the cost of the frosted-glass look. The thin
+   gradient rule along the bottom edge (::after) gives it back a bit of
+   color/depth without that cost — it's a static 2px strip, nothing about
+   it animates or repaints on scroll. */
 .topbar {
   position: sticky;
   top: 0;
@@ -259,34 +309,59 @@ input, textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 12px 16px;
   margin: 0 -16px 20px;
-  background: #05070d;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
   transform: translateZ(0);
   -webkit-backface-visibility: hidden;
 }
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-violet) 45%, var(--accent-2) 100%);
+  opacity: 0.55;
+}
 
 .brand {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-weight: 800;
-  font-size: 19px;
+  font-size: 18px;
   letter-spacing: 0.01em;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--gradient-accent);
+  color: #06111f;
+  box-shadow: 0 4px 14px -4px rgba(77, 163, 255, 0.6);
+}
+.brand-mark .material-symbols-rounded {
+  font-size: 18px;
+  transform: rotate(45deg);
+}
+
+.brand-name {
   background: var(--gradient-accent);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-
-.brand .dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent-2);
-  box-shadow: 0 0 14px 2px var(--accent-2);
+  white-space: nowrap;
 }
 
 .ws-indicator {
@@ -295,6 +370,7 @@ input, textarea {
   gap: 6px;
   font-size: 12px;
   color: var(--text-dim);
+  padding-right: 4px;
 }
 
 .ws-dot {
@@ -330,7 +406,57 @@ input, textarea {
   100% { transform: scale(2); opacity: 0; }
 }
 
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar-actions { display: flex; align-items: center; gap: 6px; }
+
+/* Icon + label pill buttons (topbar row, mobile menu sheet). Reused as
+   plain icon-only circles via the .icon-only modifier (theme toggle). */
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.topbar-btn .material-symbols-rounded { font-size: 17px; }
+.topbar-btn.icon-only {
+  padding: 7px;
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+/* 未読の運営メッセージがある間だけ点灯するバッジ。トップバー版と
+   モバイルメニューのシート版どちらの .messages-btn にも同じクラスで
+   効く(renderMessagesBadge() 参照)。 */
+.topbar-btn.messages-btn { position: relative; }
+.topbar-btn.messages-btn.has-badge::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 2px solid var(--panel);
+}
+.sheet-menu-list .btn.messages-btn.has-badge { color: var(--danger); }
+
+/* Theme toggle: the icon itself swaps (sun/moon, set in app.js) rather
+   than sliding a track — matches the icon-button language already used
+   for every other topbar action instead of introducing a new switch
+   control just for this. */
+#theme-toggle-btn .material-symbols-rounded { transition: transform 0.25s ease; }
+#theme-toggle-btn:active .material-symbols-rounded { transform: rotate(20deg); }
+
+.topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
 
 /* Below 900px the topbar can't fit its full button row (マイ投稿 / イベント /
    設定 / 管理者パネル / avatar) without wrapping and breaking the layout, so
@@ -379,6 +505,12 @@ input, textarea {
   box-shadow: var(--shadow-pop);
   position: relative;
   overflow: hidden;
+}
+.auth-theme-toggle {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1;
 }
 .auth-wrap::before {
   content: "";
@@ -870,6 +1002,21 @@ input, textarea {
   margin-bottom: 10px;
 }
 
+/* Every link linkify() produces (post text, comments, bio, event
+   descriptions, ...) is tagged class="auto-link" and styled from here —
+   one rule, themed via the usual variables, instead of depending on each
+   container that might hold user text to remember to style its own <a>
+   tags (a previous hardcoded `color: white` on just .post-text links,
+   desktop-only, is exactly the kind of gap that leaves — invisible on a
+   light background, and comments/bio/events never had a rule at all). */
+.auto-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.auto-link:hover { color: var(--accent-2); }
+
 .flight-card {
   background: linear-gradient(135deg, rgba(77, 163, 255, 0.08), rgba(139, 123, 255, 0.05) 55%, var(--panel-2));
   border: 1px solid var(--border);
@@ -1297,6 +1444,11 @@ input, textarea {
 #news-panel-slot:not(:empty) {
   margin-top: 18px;
 }
+/* イベントリストは地震情報パネルの直下に表示する。同じ空判定パターン。 */
+#events-sidebar-slot:not(:empty),
+#mobile-events-sidebar-slot:not(:empty) {
+  margin-top: 18px;
+}
 .popular-flight-item:hover { border-color: var(--accent); }
 .popular-flight-route {
   display: flex;
@@ -1640,6 +1792,46 @@ input, textarea {
 .weather-hour-temp { font-weight: 700; }
 .weather-hour-pop { color: var(--accent); font-size: 11px; }
 
+/* ---------- 気象警報・注意報 (地震情報パネル下部) ---------- */
+.warning-alert-section { margin-top: 14px; }
+.warning-alert-select {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13.5px;
+  margin-bottom: 10px;
+}
+.warning-alert-headlines {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.warning-alert-headlines li {
+  background: rgba(255, 107, 122, 0.1);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.warning-alert-none {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.warning-alert-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.warning-alert-meta a { color: var(--accent); }
+
 /* ---------- EEW slide-down popup ---------- */
 /* Page-wide banner for code-556 (緊急地震速報) messages — sits above
    everything else and slides down from off-screen. Kept in the DOM
@@ -1706,6 +1898,119 @@ input, textarea {
   .eew-popup {
     width: calc(100% - 20px);
     margin-top: 8px;
+  }
+}
+
+/* ---------- Weather-warning slide-down bar ----------
+   Same mechanism as .eew-popup above (see showWarningBar/hideWarningBar
+   in app.js) but in amber rather than red, so the two are visually
+   distinct if they ever both need to show. Offset slightly further down
+   than the EEW popup so the rare case of both appearing at once doesn't
+   have them exactly overlap. */
+.warning-bar {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  width: min(480px, calc(100% - 24px));
+  margin-top: 70px;
+  z-index: 499;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: linear-gradient(160deg, rgba(255, 159, 67, 0.22), rgba(255, 159, 67, 0.08)), var(--panel);
+  border: 1px solid #ff9f43;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-pop);
+  transform: translateX(-50%) translateY(-130%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.32, 1.4), opacity 0.25s ease;
+}
+.warning-bar.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.warning-bar-inner { flex: 1; min-width: 0; }
+.warning-bar-title {
+  font-weight: 800;
+  font-size: 14px;
+  color: #ff9f43;
+  margin-bottom: 4px;
+}
+.warning-bar-body { font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre-line; }
+.warning-bar-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+.warning-bar-close:hover { color: var(--text); }
+@media (max-width: 640px) {
+  .warning-bar {
+    width: calc(100% - 20px);
+    margin-top: 60px;
+  }
+}
+
+/* ---------- 運営からのメッセージ(バナー) ---------- */
+/* .warning-barと同じ「上から差し込むバナー」の仕組みを、管理者パネルの
+   一斉配信お知らせ向けに複製したもの(トリガーはWebSocketの
+   announcement:new — handleWsMessage参照)。警報と紛らわしくないよう、
+   オレンジ/赤系ではなくアクセントカラー(青〜金)にしている。 */
+.announcement-bar {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  width: min(480px, calc(100% - 24px));
+  margin-top: 70px;
+  z-index: 499;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: linear-gradient(160deg, rgba(77, 163, 255, 0.2), rgba(255, 180, 84, 0.08)), var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-pop);
+  transform: translateX(-50%) translateY(-130%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.32, 1.4), opacity 0.25s ease;
+}
+.announcement-bar.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.announcement-bar-inner { flex: 1; min-width: 0; }
+.announcement-bar-title {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.announcement-bar-body { font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre-line; }
+.announcement-bar-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+.announcement-bar-close:hover { color: var(--text); }
+@media (max-width: 640px) {
+  .announcement-bar {
+    width: calc(100% - 20px);
+    margin-top: 60px;
   }
 }
 
@@ -1827,6 +2132,89 @@ input, textarea {
   color: var(--text-dim);
   font-size: 11.5px;
 }
+/* ---------- Events sidebar panel (開催予定のイベント, 地震情報パネル下部) ---------- */
+.events-sidebar-panel {
+  background: linear-gradient(160deg, rgba(120, 170, 255, 0.08), transparent 45%), var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow-card);
+}
+.events-sidebar-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 10px;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.events-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.events-sidebar-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 10px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.events-sidebar-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 10px 22px -12px rgba(77, 163, 255, 0.35);
+}
+.events-sidebar-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.events-sidebar-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.events-sidebar-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+}
+.events-sidebar-item-meta span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.events-sidebar-viewall {
+  font-size: 12.5px;
+  padding: 7px 12px;
+}
+.sidebar-leaderboard-lead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.sidebar-leaderboard-rank { font-size: 13px; font-weight: 800; width: 18px; text-align: center; flex-shrink: 0; }
 .news-item-source {
   color: var(--accent-gold);
   font-weight: 600;
@@ -1918,7 +2306,11 @@ input, textarea {
 }
 
 /* ---------- News detail modal (ニュース記事クリック時のポップアップ) ---------- */
-.news-detail-modal {
+/* .modal（ベース、後方で定義）と同じ詳細度の単一クラスセレクタのままだと
+   CSSの「後に書かれた方が勝つ」ルールにより、後方にあるベースの.modal
+   (max-width:420px/padding:20pxなど)にここでの指定が上書きされてしまう
+   ため、.modalとの複合セレクタにして確実にこちらを優先させる。 */
+.modal.news-detail-modal {
   max-width: 480px;
   padding: 0;
   overflow: hidden;
@@ -1986,6 +2378,731 @@ input, textarea {
 }
 .news-detail-link:hover { filter: brightness(1.06); }
 
+/* ----- スマホでは記事詳細ポップアップを画面幅いっぱい・下寄せの
+   ボトムシート風にして、閉じるボタンやリンクを親指で押しやすくする ----- */
+@media (max-width: 640px) {
+  .modal-backdrop:has(.news-detail-modal) {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal.news-detail-modal {
+    max-width: none;
+    width: 100%;
+    max-height: 88dvh;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .news-detail-image {
+    max-height: 180px;
+  }
+  .news-detail-body {
+    padding: 16px 18px max(18px, env(safe-area-inset-bottom, 18px));
+  }
+  .news-detail-title {
+    font-size: 17px;
+  }
+  .news-detail-link {
+    width: 100%;
+    text-align: center;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}
+
+/* ---------- News hub modal (🗞️ ニュース ボタン — 画面いっぱいのニュースサイト風ビュー) ---------- */
+/* 全画面表示にするため、通常の.modal-backdrop(中央寄せ+余白)を上書き
+   して、モーダル本体が画面の隅々まで埋まるようにする。
+   .modal-backdrop/.modal(ベース、後方で定義)と同じ詳細度の単一クラス
+   セレクタのままだと、CSSの「後に書かれた方が勝つ」ルールにより後方の
+   ベース定義(padding:16px/max-width:420pxなど)に上書きされてしまう
+   ため、.modal-backdrop・.modalとの複合セレクタにして確実にこちらを
+   優先させる(実際にこれが原因で全画面表示が崩れていた)。 */
+.modal-backdrop.news-hub-backdrop {
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+}
+/* 全画面モーダルが開いている間は背面(フィード等)をスクロールさせない。
+   position:fixedにするとiOSでスクロール位置が飛ぶ機種があるため、
+   overflow:hiddenのみに留める。 */
+body.news-hub-open {
+  overflow: hidden;
+}
+.modal.news-hub-modal {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh; /* iOS/Androidのアドレスバー分の誤差を吸収 */
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  border-radius: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+}
+.news-hub-masthead {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  padding-top: max(14px, env(safe-area-inset-top, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  background: linear-gradient(160deg, rgba(255, 138, 92, 0.14), transparent 55%), var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.news-hub-back {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.news-hub-back:hover {
+  border-color: var(--accent-gold);
+}
+.news-hub-back:active {
+  transform: scale(0.94);
+}
+.news-hub-back-arrow {
+  font-size: 18px;
+  line-height: 1;
+}
+.news-hub-masthead-text {
+  min-width: 0;
+}
+.news-hub-masthead-title {
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.news-hub-masthead-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* カテゴリータブ — 横スクロールするピル型タブ。カテゴリーが2種類以上
+   出揃うまでは(renderNewsHubTabs参照)hiddenのまま。 */
+.news-hub-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.news-hub-tabs::-webkit-scrollbar { display: none; }
+.news-hub-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.news-hub-tab:hover {
+  color: var(--text);
+  border-color: var(--accent-gold);
+}
+.news-hub-tab.active {
+  color: #1a0f06;
+  background: var(--gradient-gold);
+  border-color: transparent;
+}
+
+#news-hub-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px;
+  padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+/* 大画面では記事が横に間延びしすぎないよう、読みやすい幅で中央寄せする
+   (モーダル自体は引き続き画面いっぱいに広がる)。PC版は情報量を増やす
+   ため、デスクトップ幅ではさらに広く使う(下の min-width:900px ブロック
+   参照)。 */
+.news-hub-body-inner {
+  max-width: 900px;
+  margin: 0 auto;
+}
+.news-hub-hero {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.news-hub-hero:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-gold);
+  box-shadow: 0 14px 30px -14px rgba(255, 138, 92, 0.4);
+}
+.news-hub-hero-image {
+  display: block;
+  width: 100%;
+  height: 240px;
+  object-fit: cover;
+  background: var(--panel);
+}
+.news-hub-hero-image.news-item-thumb-fallback {
+  height: 240px;
+  font-size: 44px;
+}
+.news-hub-hero-body {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.news-hub-hero-title {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.news-hub-hero-summary {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+@media (max-width: 860px) {
+  .news-hub-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .news-hub-grid { grid-template-columns: 1fr; }
+}
+.news-hub-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.news-hub-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-gold);
+  box-shadow: 0 12px 24px -14px rgba(255, 138, 92, 0.35);
+}
+.news-hub-card-image {
+  display: block;
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  background: var(--panel);
+}
+.news-hub-card-image.news-item-thumb-fallback {
+  height: 120px;
+  font-size: 26px;
+}
+.news-hub-card-body {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.news-hub-card-category {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.3);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.news-hub-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-hub-card-summary {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ----- 「その他の見出し」— グリッドに入りきらない記事を画像なしの
+   密なテキスト行で並べる欄。PC版で画面の余白を情報で埋めるため。 ----- */
+.news-hub-list-heading {
+  margin: 26px 0 10px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+.news-hub-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.news-hub-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.news-hub-list-row:hover {
+  background: var(--panel-2);
+}
+.news-hub-list-row-category {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.3);
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.news-hub-list-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.news-hub-list-row-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ----- PC(デスクトップ)版はモーダルが画面いっぱいに広い分、情報量を
+   増やす:表示幅を広げてグリッドを4列にし、その他の見出し欄を2列組みに
+   して一覧性を上げる。 ----- */
+@media (min-width: 900px) {
+  .news-hub-body-inner {
+    max-width: 1360px;
+  }
+  .news-hub-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .news-hub-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 28px;
+    border-top: none;
+  }
+  .news-hub-list-row:nth-child(odd) {
+    border-top: 1px solid var(--border);
+  }
+  .news-hub-list-row:nth-last-child(1),
+  .news-hub-list-row:nth-last-child(2) {
+    border-bottom: 1px solid var(--border);
+  }
+}
+@media (min-width: 1400px) {
+  .news-hub-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .news-hub-list {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* ----- スマホ向け調整(ヘッダー/タブ/カードを一回り小さく、タップ領域は
+   確保したまま密度を上げる) ----- */
+
+@media (max-width: 640px) {
+  .news-hub-masthead {
+    padding: 12px 16px;
+    padding-top: max(12px, env(safe-area-inset-top, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    gap: 10px;
+  }
+  .news-hub-back {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+  }
+  .news-hub-masthead-title {
+    font-size: 16.5px;
+  }
+  .news-hub-masthead-sub {
+    font-size: 11px;
+  }
+  .news-hub-tabs {
+    padding: 8px 16px;
+  }
+  .news-hub-tab {
+    padding: 6px 12px;
+    font-size: 12.5px;
+  }
+  #news-hub-body {
+    padding: 14px 16px 20px;
+  }
+  .news-hub-hero-image {
+    height: 180px;
+  }
+  .news-hub-hero-image.news-item-thumb-fallback {
+    height: 180px;
+    font-size: 36px;
+  }
+  .news-hub-hero-title {
+    font-size: 16.5px;
+  }
+  .news-hub-grid {
+    gap: 10px;
+  }
+  .news-hub-card-image {
+    height: 96px;
+  }
+  .news-hub-card-image.news-item-thumb-fallback {
+    height: 96px;
+    font-size: 22px;
+  }
+  .news-hub-card-title {
+    font-size: 12.5px;
+  }
+  .news-hub-hero-summary {
+    -webkit-line-clamp: 2;
+    font-size: 12.5px;
+  }
+  .news-hub-card-summary {
+    display: none; /* カードが縦に伸びすぎないよう、要約はモバイルでは省略 */
+  }
+  .news-hub-list-heading {
+    margin: 20px 0 6px;
+    font-size: 13px;
+  }
+  .news-hub-list-row {
+    padding: 9px 2px;
+    gap: 8px;
+  }
+  .news-hub-list-row-title {
+    font-size: 13px;
+  }
+  .news-hub-list-row-meta {
+    display: none; /* 横幅が足りないので出典・時刻は詳細ポップアップ側に譲る */
+  }
+}
+
+
+/* ---------- Memo (ニーボード) ---------- */
+/* .news-hub-backdrop/.news-hub-modal(全画面モーダルの土台)を再利用しつつ、
+   本体はリスト(左)+エディタ(右)の2カラムにする。狭幅では
+   .memo-sidebar-open が付いている間だけリストをオーバーレイ表示する
+   ドロワー方式にして、エディタ(手書きキャンバス)に画面を譲る。
+   z-indexは他のどのオーバーレイ(通常モーダル90・画像拡大表示100・
+   フライト詳細フルスクリーン95)よりも高くし、それらを開いたままでも
+   メモを常に最前面に呼び出せるようにしてある(トースト通知200だけは
+   メモより上に出るようにして保存完了などの通知が隠れないようにする)。
+   .modal-backdrop単体より詳細度を上げるため複合セレクタにしている
+   (同じ理由は.news-hub-backdrop側のコメント参照)。 */
+.modal-backdrop.memo-backdrop {
+  z-index: 150;
+}
+.memo-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.memo-sidebar {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+  overflow-y: auto;
+}
+.memo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+.memo-list-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.memo-list-item:hover { border-color: var(--accent); }
+.memo-list-item.active { border-color: var(--accent); background: rgba(122, 162, 255, 0.1); }
+.memo-list-item-title { font-weight: 700; font-size: 13px; margin-bottom: 3px; color: var(--text); }
+.memo-list-item-preview {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.memo-list-item-time { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.memo-empty { color: var(--text-dim); font-size: 13px; padding: 8px 2px; }
+
+.memo-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.memo-editor-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.memo-title-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+.memo-title-input:focus { outline: none; border-color: var(--accent); }
+.memo-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.memo-canvas-toolbar input[type="color"] {
+  width: 34px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.memo-canvas-toolbar input[type="range"] { width: 100px; }
+.memo-tool-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(122, 162, 255, 0.12); }
+.memo-canvas-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  line-height: 0;
+  background: #fff;
+}
+.memo-canvas {
+  display: block;
+  width: 100%;
+  /* iPad等でペン/指での描画中にページ自体がスクロールしてしまうのを防ぐ
+     ——手書き機能(Apple Pencil対応)の要となる設定。 */
+  touch-action: none;
+  cursor: crosshair;
+}
+.memo-text-input {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+}
+.memo-text-input:focus { outline: none; border-color: var(--accent); }
+.memo-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.memo-editor-actions-buttons { display: flex; gap: 8px; }
+.memo-status { font-size: 12px; color: var(--text-dim); }
+
+.memo-list-toggle { display: none; }
+
+@media (max-width: 780px) {
+  .memo-list-toggle { display: inline-flex; }
+  .memo-sidebar {
+    position: absolute;
+    inset: 0 20% 0 0;
+    z-index: 5;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-pop);
+  }
+  .memo-backdrop.memo-sidebar-open .memo-sidebar { transform: translateX(0); }
+  .memo-canvas-toolbar input[type="range"] { width: 70px; }
+}
+
+/* 常時表示のフローティングボタン。他の全画面ビュー(フライト詳細95・
+   画像拡大表示100)より高いz-indexにして、それらの上に浮かせて常に
+   タップできるようにする(メモの入口をメニューの奥に隠さないため)。
+   メモ本体のモーダル(z-index:150)より低いので、メモを開いている間は
+   その裏に自然に隠れる。 */
+.memo-fab {
+  position: fixed;
+  right: 18px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 110;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(160deg, var(--accent), #2f6fe0);
+  color: #fff;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+  transition: transform 0.15s;
+}
+.memo-fab:hover { transform: scale(1.06); }
+.memo-fab:active { transform: scale(0.94); }
+@media (max-width: 899px) {
+  /* モバイルでは下部タブバー(高さ54px+セーフエリア)の上に重ならない
+     位置まで持ち上げる。 */
+  .memo-fab { bottom: calc(54px + env(safe-area-inset-bottom, 0px) + 14px); }
+}
+
+/* ---------- Memo PiP (常時最前面ウィンドウ) ---------- */
+/* documentPictureInPicture()で開く別ウィンドウの中身。この別ウィンドウは
+   メイン画面と同じstyles.cssをlinkで読み込むだけなので、bodyの配色や
+   :rootのCSS変数(--bg, --panel等)はそのまま自動的に効く。ここに書くのは
+   PiP専用の小さなレイアウト調整のみ。ウィンドウが小さい前提で詰めている。 */
+.memo-pip-body { height: 100vh; overflow: hidden; }
+.memo-pip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.memo-pip-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.memo-pip-toolbar input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.memo-pip-toolbar input[type="range"] { width: 64px; }
+.memo-pip-canvas-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  line-height: 0;
+}
+.memo-pip-canvas-wrap .memo-canvas { width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.memo-pip-text {
+  flex: 0 0 68px;
+  min-height: 0;
+  font-size: 12px;
+  padding: 6px 8px;
+  resize: none;
+}
+.memo-pip-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 /* ---------- Flight detail popup ---------- */
 /* Opened when a flight card is clicked — a closer, OFP-briefing-style look
@@ -2045,6 +3162,23 @@ input, textarea {
   color: var(--text-dim);
 }
 .flight-detail-map .leaflet-control-attribution a { color: var(--text-dim); }
+/* Basemap-style switch button (top-right, next to the zoom control) */
+.flight-detail-map .map-style-switch { margin-top: 10px; }
+.flight-detail-map .map-style-switch-btn {
+  display: block;
+  width: auto;
+  height: auto;
+  padding: 6px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.flight-detail-map .map-style-switch-btn:hover { background: var(--panel-2); }
 .flight-detail-grid {
   display: flex;
   flex-direction: column;
@@ -2268,78 +3402,325 @@ input, textarea {
   border: none;
   color: var(--text-dim);
   font-size: 18px;
+  /* The glyph itself is ~18px, well under the ~44px touch target phones
+     need — padding + a matching negative margin grows the tappable area
+     without nudging the button's visible position or the layout around it. */
+  padding: 13px;
+  margin: -13px -13px 0 0;
+  line-height: 1;
+  cursor: pointer;
 }
 .modal-close:hover { color: var(--text); }
+.modal-close:active { transform: scale(0.9); }
 
-/* Profile popup: on phones/narrow screens the follow-list panel stacks
-   below the main profile content (full width, capped height, scrolls
-   independently); from 720px up (tablet/desktop) it sits beside it as a
-   fixed-width side column, matching the same mobile-first breakpoint used
-   by .flight-fullscreen above. */
-.profile-modal { max-width: 420px; }
-.profile-columns {
+/* 「メッセージ」タブ(openMessagesModal) — 運営からのお知らせをDM風の
+   吹き出しで遡れる一覧。送信元は常に運営一人だけなので、吹き出しは
+   すべて左寄せで並ぶ(相互のやり取りではない片方向ログ)。 */
+.dm-modal { max-width: 460px; display: flex; flex-direction: column; max-height: 85vh; }
+.dm-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 4px 2px 4px;
+  margin-top: 4px;
+  max-height: calc(85vh - 90px);
 }
-.profile-main-col { min-width: 0; }
-.profile-side-col {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-}
-.profile-anime-sidebar:empty { display: none; }
-.profile-anime-sidebar-title {
-  font-weight: 800;
-  font-size: 13px;
-  letter-spacing: 0.01em;
-  margin-bottom: 10px;
+.dm-message { display: flex; gap: 10px; align-items: flex-start; }
+.dm-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--gradient-accent, var(--accent));
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  font-size: 15px;
 }
-.profile-anime-sidebar-list {
+.dm-bubble-col { min-width: 0; max-width: calc(100% - 44px); }
+.dm-bubble-meta { margin-bottom: 3px; }
+.dm-sender { font-size: 11.5px; font-weight: 700; color: var(--text-dim); }
+.dm-bubble {
+  background: var(--bg-elevated, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 14px 4px;
+  padding: 10px 13px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  white-space: pre-line;
+  word-break: break-word;
+}
+.dm-time { font-size: 10.5px; color: var(--text-dim); margin-top: 4px; }
+
+/* Profile popup layout: a fixed header (avatar/name/bio/flight stats),
+   then a tab bar — 投稿 / フォロワー / フォロー中 / (あれば)好きなアニメ —
+   switching a single content area below it. Previous versions stacked all
+   four sections vertically and reshuffled their order per screen size to
+   chase "which section ends up buried below a long one" — favorite anime
+   (up to 10 cards, each with an image + synopsis) or the post list could
+   each run long enough to bury whichever section came after it. Tabs
+   sidestep that permanently: every section starts one tap away from the
+   header, regardless of how long any of them are. */
+.profile-modal { max-width: 480px; }
+
+/* ---------- プロフィールヘッダー ---------- */
+/* スマホ/タブレット(<900px, .mobile-sheet-backdropの範囲と同じ)は今まで
+   通りの控えめな表示。PC(≥900px)だけ、バナー+大きめアバター+大きい文字の
+   リッチな表示に切り替える — サイズをinline styleではなくクラス経由に
+   したのはこのため(avatarHtml()は明示サイズを渡さなければ.avatarの
+   既定サイズを使うので、ここではラッパー越しにCSSだけでサイズ管理する)。 */
+.profile-header-banner { display: none; }
+.profile-header-top { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.profile-header-avatar-wrap .avatar,
+.profile-header-avatar-wrap .avatar-fallback { width: 64px; height: 64px; font-size: 22px; }
+.profile-header-info { flex: 1; min-width: 0; }
+.profile-header-name { font-weight: 700; font-size: 17px; }
+.profile-header-handle { color: var(--text-dim); font-size: 13px; }
+.profile-header-follow-slot { flex-shrink: 0; }
+.profile-header-bio { margin-bottom: 14px; font-size: 14px; }
+.profile-header-stats { display: flex; flex-wrap: wrap; row-gap: 10px; gap: 22px; font-size: 13px; color: var(--text-dim); }
+.profile-header-stat b { color: var(--accent-2); display: block; font-size: 16px; }
+
+@media (min-width: 900px) {
+  .profile-modal { max-width: 920px; padding: 0 0 24px; }
+  .profile-modal .modal-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    margin: 0;
+    background: rgba(4, 6, 12, 0.55);
+    border-radius: 50%;
+    color: #fff;
+  }
+  .profile-modal .modal-close:hover { color: #fff; background: rgba(4, 6, 12, 0.75); }
+  .profile-modal > div:not(.profile-header-banner) { padding-left: 32px; padding-right: 32px; }
+
+  /* 色はユーザーごとのhue(アバターのフォールバック色と同じ基準)から
+     生成する。JS側で.profile-modal自体に
+     style.setProperty("--profile-hue", user.hue)を設定している
+     (openUserProfile参照) — バナーと#profile-view-slotの共通の祖先なので
+     どちらの子孫からも参照できる。 */
+  .profile-header-banner {
+    display: block;
+    height: 140px;
+    margin: 0 0 20px;
+    border-radius: calc(var(--radius) + 2px) calc(var(--radius) + 2px) 0 0;
+    background:
+      linear-gradient(135deg, hsl(var(--profile-hue, 200) 65% 42%) 0%, hsl(calc(var(--profile-hue, 200) + 45) 65% 52%) 100%);
+  }
+  .profile-header-top { transform: translateY(-56px); margin-bottom: -56px; align-items: flex-end; gap: 20px; }
+  .profile-header-avatar-wrap .avatar,
+  .profile-header-avatar-wrap .avatar-fallback {
+    width: 112px;
+    height: 112px;
+    font-size: 38px;
+    border: 4px solid var(--panel);
+  }
+  .profile-header-info { padding-bottom: 6px; }
+  .profile-header-name { font-size: 26px; }
+  .profile-header-handle { font-size: 15px; }
+  .profile-header-follow-slot { padding-bottom: 6px; }
+  .profile-header-bio { font-size: 15px; max-width: 640px; }
+  .profile-header-stats { gap: 32px; font-size: 14px; }
+  .profile-header-stat b { font-size: 21px; }
+
+  .profile-tabs { margin-top: 6px; }
+  .profile-tab-btn { font-size: 14px; padding: 9px 18px; }
+
+  /* 投稿/ログブック/実績など各タブの中身も、幅が広がった分だけ余白を
+     持たせる(内容自体のレイアウトは変えない — 大きく刷新の対象は
+     「プロフィール枠そのもの」であって個々のカード配置ではないため)。 */
+  .profile-tab-panel { font-size: 15px; }
+}
+
+.profile-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 70vh;
-  overflow-y: auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
-.profile-anime-sidebar-list .anime-card { margin-bottom: 0; }
-.profile-follow-panel {
-  display: none;
-  width: 100%;
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
-  max-height: 45vh;
-  overflow-y: auto;
+.profile-tab-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.profile-follow-panel.is-open { display: block; }
-@media (min-width: 720px) {
-  .profile-modal { max-width: 820px; }
-  .profile-columns {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 24px;
+.profile-tab-btn:hover { color: var(--text); border-color: var(--accent-gold); }
+.profile-tab-btn.active {
+  color: #1a0f06;
+  background: var(--gradient-gold);
+  border-color: transparent;
+}
+.profile-tab-panel .anime-card { margin-bottom: 12px; }
+.profile-tab-panel .anime-card:last-child { margin-bottom: 0; }
+
+/* ---------- ログブックタブ: 就航空港 / 最近のフライト ---------- */
+.logbook-airport-list { display: flex; flex-direction: column; gap: 6px; }
+.logbook-airport-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.logbook-airport-icao { font-weight: 800; font-size: 13px; flex-shrink: 0; width: 48px; }
+.logbook-airport-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.logbook-airport-visits { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--accent-2); }
+.logbook-more-note { margin-top: 8px; font-size: 12px; color: var(--text-dim); text-align: center; }
+
+.logbook-recent-list { display: flex; flex-direction: column; gap: 6px; }
+.logbook-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.logbook-recent-row:hover { border-color: var(--accent); }
+.logbook-recent-route { font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.logbook-recent-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.logbook-recent-date { flex-shrink: 0; font-size: 11px; color: var(--text-dim); }
+
+/* ---------- 実績タブ: バッジ ---------- */
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.badge-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 10px;
+  text-align: center;
+  opacity: 0.45;
+  filter: grayscale(0.6);
+  transition: opacity 0.15s, filter 0.15s, border-color 0.15s;
+}
+.badge-card.earned {
+  opacity: 1;
+  filter: none;
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 1px rgba(255, 180, 84, 0.25) inset;
+}
+.badge-icon { font-size: 26px; line-height: 1.2; }
+.badge-label { font-weight: 700; font-size: 12px; margin-top: 6px; }
+.badge-description { font-size: 10.5px; color: var(--text-dim); margin-top: 3px; line-height: 1.4; }
+.badge-progress-track { margin-top: 8px; height: 6px; }
+
+/* ---------- ランキングモーダル ---------- */
+.leaderboard-list { display: flex; flex-direction: column; gap: 6px; }
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.leaderboard-row:hover { border-color: var(--accent); }
+.leaderboard-row.is-me { border-color: var(--accent-gold); background: rgba(255, 180, 84, 0.08); }
+.leaderboard-rank { width: 30px; flex-shrink: 0; text-align: center; font-weight: 800; font-size: 14px; color: var(--text-dim); }
+.leaderboard-name { flex: 1; min-width: 0; }
+.leaderboard-display-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.leaderboard-callsign { font-size: 11px; color: var(--text-dim); }
+.leaderboard-value { flex-shrink: 0; font-weight: 800; font-size: 14px; color: var(--accent-2); }
+.leaderboard-me-divider {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+
+/* ---------- Profile / events popups as a mobile bottom sheet ----------
+   On phones these two are content-heavy (stats, post list, tabs, forms) —
+   a small centered card makes the ✕ hard to find one-handed and wastes
+   the safe-area edges. Below 900px, present them the same way the
+   quake/flights/menu panels already do: anchored to the bottom, full
+   width, rounded top corners only. Desktop keeps the original centered
+   card (this block is a no-op above 900px). See openUserProfile() /
+   openEventsModal() in app.js for the mobile-sheet-backdrop class. */
+@media (max-width: 899.98px) {
+  .mobile-sheet-backdrop {
+    align-items: flex-end;
+    padding: 0;
   }
-  .profile-main-col { flex: 1; }
-  .profile-side-col {
-    width: 260px;
-    flex-shrink: 0;
+  .mobile-sheet-backdrop .profile-modal,
+  .mobile-sheet-backdrop .events-modal {
+    max-width: none;
+    width: 100%;
+    border-radius: 18px 18px 0 0;
+    max-height: 88vh;
+    padding-top: 22px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom, 0));
+    animation: mobile-sheet-up 0.2s ease-out;
+    position: relative;
   }
-  .profile-follow-panel {
-    border-top: none;
-    border-left: 1px solid var(--border);
-    padding-top: 0;
-    padding-left: 20px;
-    max-height: 70vh;
+  /* Same drag-handle affordance as .mobile-panel-sheet-handle, drawn with
+     a pseudo-element so the desktop-shared HTML doesn't need a mobile-only
+     node threaded through it. */
+  .mobile-sheet-backdrop .profile-modal::before,
+  .mobile-sheet-backdrop .events-modal::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--border);
   }
 }
 
 /* ---------- Mobile "その他" menu sheet (topbar actions moved here) ---------- */
 .sheet-menu-list { display: flex; flex-direction: column; gap: 8px; }
-.sheet-menu-list .btn { display: block; width: 100%; text-align: left; }
+.sheet-menu-list .btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+}
+.sheet-menu-list .btn .material-symbols-rounded { font-size: 18px; flex-shrink: 0; }
 
 /* ---------- Favorite-anime card (profile view) ---------- */
 /* 画像がある場合はカード全体の背景に敷き、下から暗くなるグラデーションで
@@ -2520,6 +3901,45 @@ input, textarea {
   border-radius: 6px;
   transition: width 0.3s ease;
 }
+
+/* ---------- 管理者パネル: 投稿数の折れ線グラフ ---------- */
+.admin-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.admin-toggle-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.admin-toggle-group button {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.admin-toggle-group button + button { border-left: 1px solid var(--border); }
+.admin-toggle-group button.active { background: var(--gradient-accent); color: #fff; }
+.admin-linechart-wrap {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 12px 4px;
+}
+.admin-linechart { width: 100%; height: 180px; display: block; }
+.admin-linechart-grid { stroke: var(--border); stroke-width: 1; }
+.admin-linechart-area { fill: var(--accent); opacity: 0.12; stroke: none; }
+.admin-linechart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.admin-linechart-dot { fill: var(--panel-2); stroke: var(--accent); stroke-width: 2; }
+.admin-linechart-axis-label { font-size: 9px; fill: var(--text-dim); }
 .admin-bar-value { width: 44px; flex-shrink: 0; text-align: right; font-size: 12px; font-weight: 700; }
 
 .admin-filter-row { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
@@ -2582,26 +4002,31 @@ input, textarea {
 }
 
 /* ---------- Feed ad slot ---------- */
-/* Placeholder shown briefly before injectHtmlWithScripts() (app.js)
-   replaces this element's content with the admin-configured ad network's
-   own markup — sizing/layout beyond that point is entirely up to the ad
-   network's snippet. */
+/* The actual ad content lives inside a separate iframe (see adSlotHtml in
+   app.js + GET /api/ads/frame in routes/ads.js) rather than being injected
+   into this document directly — see the big comment on adSlotHtml for why.
+   The label stays visible above the iframe the whole time (ad-disclosure,
+   not just a loading placeholder like before). */
 .ad-slot {
   background: var(--panel);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   margin-bottom: 14px;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
 }
 .ad-slot-label {
+  display: block;
   color: var(--text-dim);
   font-size: 11px;
   letter-spacing: 0.05em;
-  padding: 10px;
+  padding: 8px 10px 0;
+}
+.ad-slot-frame {
+  display: block;
+  width: 100%;
+  height: 100px;
+  border: none;
+  transition: height 0.2s ease;
 }
 
 @media (max-width: 640px) {
