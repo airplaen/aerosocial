@@ -233,6 +233,16 @@ img, video, iframe { max-width: 100%; }
   .main-grid { grid-template-columns: 248px minmax(0, 700px) 300px; }
 }
 
+/* ================= VATSIM / VATJPN イベント (vatsim-events.js) ================= */
+.events-modal .tabs { overflow-x: auto; scrollbar-width: none; }
+.events-modal .tabs::-webkit-scrollbar { display: none; }
+.events-modal .tabs button { white-space: nowrap; }
+.vatsim-event-card .vatsim-banner {
+  width: 100%; height: 120px; object-fit: cover;
+  border-radius: 10px; margin-bottom: 10px; display: block;
+}
+.vatsim-event-card .event-card-bottom { margin-top: 10px; }
+
 /* ================= モバイル ================= */
 @media (max-width: 899.98px) {
   .app-shell { padding-inline: 12px; }
