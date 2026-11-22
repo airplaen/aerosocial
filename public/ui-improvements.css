@@ -1,0 +1,151 @@
+/* =====================================================================
+   AeroSocial — UI improvements overlay
+   ---------------------------------------------------------------------
+   styles.css への「追加の上書き」専用シート。index.html で styles.css の
+   後に読み込まれる前提で、既存ルールを壊さずに次だけを改善する:
+
+   1. キーボード操作時のフォーカス表示 (従来は入力欄以外ほぼ無し)
+   2. タップ領域の最小 44px 化 (トップバーのアイコンボタンは 32px だった)
+   3. ノッチ付き端末のセーフエリア対応 (viewport-fit=cover とセット)
+   4. ライトテーマで読めなかったエラー表示のコントラスト修正
+   5. iOS Safari が入力欄フォーカス時に自動ズームする問題 (16px 未満が原因)
+   6. prefers-reduced-motion / 強制カラーモードへの配慮
+   7. 100dvh 対応ブラウザでの高さのちらつき軽減、長文・URL の折り返し
+
+   既存のクラス名・変数 (--bg / --panel / --accent 等) だけに依存し、
+   新しいレイアウトは作らない。不要になればこのファイルと
+   index.html の <link> 1行を消すだけで元に戻せる。
+   ===================================================================== */
+
+/* ブラウザのフォーム部品・スクロールバー等をテーマに合わせる */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+/* ---------- スキップリンク (キーボード / スクリーンリーダー向け) --- */
+.skip-link {
+  position: fixed;
+  top: -60px;
+  left: 12px;
+  z-index: 200;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus-visible { top: 12px; }
+
+/* ---------- フォーカス表示 ------------------------------------------
+   マウス操作では出さず (:focus-visible)、キーボード操作のときだけ
+   全ての操作要素にはっきりしたリングを出す。従来は .field input 等の
+   一部にしかフォーカス表現がなく、Tab 移動で現在位置が分からなかった。 */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.field input:focus-visible,
+.field textarea:focus-visible,
+.anime-editor-row input:focus-visible {
+  outline: none; /* 入力欄は従来どおり box-shadow のリングを使う */
+}
+
+/* ---------- タップ領域 ----------------------------------------------
+   Apple HIG / Material ともに最小 44px が目安。トップバーの丸ボタンは
+   32px しかなく、フライト中のタブレット操作等で押し間違えやすかった。 */
+.topbar-btn.icon-only {
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+}
+.mobile-tabbar { height: calc(54px + env(safe-area-inset-bottom, 0px)); }
+.mobile-tabbar .tab-btn { min-height: 44px; }
+.tabs button { min-height: 40px; }
+.anime-editor-remove { width: 40px; height: 40px; }
+
+/* ---------- セーフエリア --------------------------------------------
+   app-shell の下余白にホームインジケーター分を足し、最後の投稿が
+   タブバー + インジケーターの裏に隠れないようにする。 */
+.app-shell {
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 900px) {
+  .app-shell { padding-bottom: 48px; }
+}
+
+/* ---------- ビューポート高さ ----------------------------------------
+   モバイルブラウザのアドレスバー伸縮で 100vh が跳ねる問題の緩和。
+   dvh 非対応ブラウザでは上の min-height (styles.css) がそのまま効く。 */
+body { min-height: 100dvh; }
+
+/* ---------- ライトテーマのコントラスト修正 --------------------------
+   .error-banner の文字色は暗色前提の #ffb3bb 固定で、ライトテーマの
+   薄い背景では読めなかった。ライト時は濃い赤に切り替える。 */
+:root[data-theme="light"] .error-banner {
+  background: rgba(226, 67, 79, 0.1);
+  border-color: rgba(226, 67, 79, 0.45);
+  color: #9c1c28;
+}
+/* ライトテーマでの選択色も背景に埋もれないようにする */
+::selection { background: rgba(77, 163, 255, 0.35); }
+:root[data-theme="light"] ::selection { background: rgba(47, 127, 224, 0.28); }
+
+/* ---------- iOS の自動ズーム防止 ------------------------------------
+   iOS Safari は font-size 16px 未満の入力欄にフォーカスすると自動で
+   ズームし、レイアウトがずれて戻らなくなる。モバイル幅だけ 16px に
+   上げ、デスクトップの見た目は変えない。 */
+@media (max-width: 899.98px) {
+  .field input,
+  .field textarea,
+  .anime-editor-row input {
+    font-size: 16px;
+  }
+}
+
+/* ---------- 長文・長い URL の折り返し --------------------------------
+   URL や英単語の連続がフィード幅をはみ出し、横スクロールを発生させる
+   ことがあった。本文系は単語途中でも折り返して収める。 */
+body { overflow-wrap: break-word; }
+.auto-link { overflow-wrap: anywhere; }
+img, video, iframe { max-width: 100%; }
+
+/* ---------- トースト -------------------------------------------------
+   連続したトーストが画面端に張り付いて読めないケースの緩和。
+   左右に余白を持たせ、テキストを中央寄せ・折り返し可能にする。 */
+.toast {
+  left: 16px;
+  right: 16px;
+  margin-inline: auto;
+  max-width: 480px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  z-index: 300;
+}
+
+/* ---------- 動きを減らす設定への配慮 --------------------------------
+   OS で「視差効果を減らす」を有効にしている人には、アニメーションと
+   トランジションをほぼ止める (WS ドットのパルスやシートのスライド等)。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- 強制カラーモード (Windows ハイコントラスト等) ---------- */
+@media (forced-colors: active) {
+  .ws-dot,
+  .mobile-tabbar .tab-btn.has-badge .material-symbols-rounded::after,
+  .topbar-btn.messages-btn.has-badge::after {
+    forced-color-adjust: none;
+  }
+}
