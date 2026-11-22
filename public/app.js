@@ -5407,15 +5407,15 @@
       const tabsEl = overlay.querySelector("#profile-tabs");
       const tabDefs = [
         { id: "posts", label: "投稿" },
-        { id: "logbook", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>bar_chart</span> ログブック" },
-        { id: "achievements", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>emoji_events</span> 実績" },
+        { id: "logbook", label: "ログブック", icon: "bar_chart" },
+        { id: "achievements", label: "実績", icon: "emoji_events" },
         { id: "followers", label: `フォロワー ${followState.followerCount}` },
         { id: "following", label: `フォロー中 ${followingCount}` },
       ];
-      if (animeList.length) tabDefs.push({ id: "anime", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>movie</span> 好きなアニメ" });
+      if (animeList.length) tabDefs.push({ id: "anime", label: "好きなアニメ", icon: "movie" });
       tabsEl.hidden = false;
       tabsEl.innerHTML = tabDefs.map((t) => `
-        <button type="button" class="profile-tab-btn${t.id === "posts" ? " active" : ""}" data-tab="${t.id}">${escapeHtml(t.label)}</button>
+        <button type="button" class="profile-tab-btn${t.id === "posts" ? " active" : ""}" data-tab="${t.id}">${t.icon ? `<span class="material-symbols-rounded ui-ic" aria-hidden="true">${t.icon}</span> ` : ""}${escapeHtml(t.label)}</button>
       `).join("");
       tabsEl.querySelectorAll(".profile-tab-btn").forEach((btn) => {
         btn.addEventListener("click", () => showTab(btn.dataset.tab));
