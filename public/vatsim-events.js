@@ -73,7 +73,8 @@
       .replace(/&amp;/g, "&")
       .trim();
     const overlay = document.createElement("div");
-    overlay.className = "modal-backdrop vatsim-detail-backdrop";
+    // mobile-sheet-backdrop: スマホでは他のポップアップと同じボトムシート表示にする。
+    overlay.className = "modal-backdrop mobile-sheet-backdrop vatsim-detail-backdrop";
     overlay.innerHTML = `
       <div class="modal vatsim-detail-modal" role="dialog" aria-modal="true" aria-label="イベント詳細">
         <button type="button" class="modal-close" aria-label="閉じる">✕</button>
@@ -276,24 +277,27 @@
   }
 
   function injectMiniPanel() {
-    if (document.getElementById("vatsim-mini-panel")) return;
-    const popular = document.querySelector(".popular-flights");
-    if (!popular || !popular.parentElement) return;
-    const panel = document.createElement("div");
-    panel.className = "panel vatsim-mini-panel";
-    panel.id = "vatsim-mini-panel";
-    panel.innerHTML = `<div class="vatsim-mini-head"><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> VATSIMイベント</div><div class="vatsim-mini-body"><div class="vatsim-mini-empty">読み込み中...</div></div>`;
-    // 項目クリックで詳細ポップアップを出す (公式ページへはポップアップ内から)。
-    panel.addEventListener("click", (e) => {
-      const item = e.target.closest(".vatsim-mini-item");
-      if (!item) return;
-      const ev = (panel._miniEvents || [])[Number(item.dataset.miniIdx)];
-      if (!ev) return;
-      e.preventDefault();
-      openVatsimDetail(ev, isJapan(ev) ? "vatjpn" : "vatsim");
+    // 「人気のフライト」パネルがある場所すべてに付ける。PCは右サイドバー、
+    // スマホはボトムシート (openMobilePanel) の中にも描画されるので、
+    // そちらにも出す (サイドバーはスマホでは非表示のため)。
+    document.querySelectorAll(".popular-flights").forEach((popular) => {
+      if (!popular.parentElement || popular.dataset.vatsimMini === "1") return;
+      popular.dataset.vatsimMini = "1";
+      const panel = document.createElement("div");
+      panel.className = "panel vatsim-mini-panel";
+      panel.innerHTML = `<div class="vatsim-mini-head"><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> VATSIMイベント</div><div class="vatsim-mini-body"><div class="vatsim-mini-empty">読み込み中...</div></div>`;
+      // 項目クリックで詳細ポップアップを出す (公式ページへはポップアップ内から)。
+      panel.addEventListener("click", (e) => {
+        const item = e.target.closest(".vatsim-mini-item");
+        if (!item) return;
+        const ev = (panel._miniEvents || [])[Number(item.dataset.miniIdx)];
+        if (!ev) return;
+        e.preventDefault();
+        openVatsimDetail(ev, isJapan(ev) ? "vatjpn" : "vatsim");
+      });
+      popular.parentElement.insertBefore(panel, popular.nextSibling);
+      loadMiniPanel(panel);
     });
-    popular.parentElement.insertBefore(panel, popular.nextSibling);
-    loadMiniPanel(panel);
   }
 
   let injectTimer = null;
@@ -309,7 +313,6 @@
 
   // サーバー側の自動更新 (15分) に合わせてパネルも更新する。
   setInterval(() => {
-    const panel = document.getElementById("vatsim-mini-panel");
-    if (panel) loadMiniPanel(panel);
+    document.querySelectorAll(".vatsim-mini-panel").forEach((panel) => loadMiniPanel(panel));
   }, 15 * 60 * 1000);
 })();
