@@ -46,14 +46,68 @@
     return `${jst} JST（${z}Z）`;
   }
 
-  function cardHtml(ev, mode) {
+  // ---- イベント詳細ポップアップ ----
+  // カード/ミニパネルの項目をクリックしたときに、その場でちょっとした
+  // 詳細 (バナー・日時・空港・主催・概要) を出す。公式ページへの
+  // リンクはポップアップ内のボタンから開く。
+  function openVatsimDetail(ev, mode) {
+    document.querySelector(".vatsim-detail-backdrop")?.remove();
+    const badge = mode === "vatjpn"
+      ? "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>flag</span> VATJPN"
+      : "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>public</span> VATSIM";
+    const route = ev.airports?.length ? ev.airports.join(" · ") : "オンライン開催";
+    const banner = ev.banner
+      ? `<img class="vatsim-detail-banner" src="${escapeHtml(ev.banner)}" alt="" referrerpolicy="no-referrer" />`
+      : "";
+    // shortDescription は公式フィード由来のHTML断片なので、タグを取り除いて
+    // プレーンテキスト化してから表示する (escapeHtml で再度エスケープされる)。
+    const desc = (ev.shortDescription || "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;|&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .trim();
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop vatsim-detail-backdrop";
+    overlay.innerHTML = `
+      <div class="modal vatsim-detail-modal" role="dialog" aria-modal="true" aria-label="イベント詳細">
+        <button type="button" class="modal-close" aria-label="閉じる">✕</button>
+        ${banner}
+        <span class="event-type-badge">${badge}</span>
+        <h3 class="vatsim-detail-title">${escapeHtml(ev.name)}</h3>
+        <div class="vatsim-detail-rows">
+          <div><span class="material-symbols-rounded ui-ic" aria-hidden="true">schedule</span> ${escapeHtml(whenLabel(ev))}</div>
+          <div><span class="material-symbols-rounded ui-ic" aria-hidden="true">location_on</span> ${escapeHtml(route)}</div>
+          ${ev.organisers ? `<div><span class="material-symbols-rounded ui-ic" aria-hidden="true">business</span> ${escapeHtml(ev.organisers)}</div>` : ""}
+        </div>
+        ${desc ? `<p class="vatsim-detail-desc">${escapeHtml(desc)}</p>` : ""}
+        <a class="btn btn-primary btn-block" href="${escapeHtml(ev.link || VATSIM_EVENTS_PAGE)}" target="_blank" rel="noopener noreferrer">VATSIM公式ページで詳細を見る</a>
+      </div>
+    `;
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector(".modal-close").addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+  }
+
+  function cardHtml(ev, mode, idx) {
     const badge = mode === "vatjpn" ? "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>flag</span> VATJPN" : "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>public</span> VATSIM";
     const route = ev.airports?.length ? ev.airports.join(" · ") : "オンライン開催";
     const banner = ev.banner
       ? `<img class="vatsim-banner" src="${escapeHtml(ev.banner)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
       : "";
     return `
-      <div class="event-card vatsim-event-card">
+      <div class="event-card vatsim-event-card" data-vatsim-idx="${idx}" title="クリックで詳細を表示">
         ${banner}
         <div class="event-card-top">
           <span class="event-type-badge">${badge}</span>
@@ -98,6 +152,17 @@
       return btn;
     });
 
+    // 現在表示中のVATSIMイベント一覧。カードのクリックで詳細を出すために保持する。
+    let currentEvents = [];
+    let currentMode = "vatsim";
+    listSlot.addEventListener("click", (e) => {
+      if (e.target.closest("a")) return; // 「詳細を見る」などのリンクはそのまま
+      const card = e.target.closest(".vatsim-event-card");
+      if (!card) return;
+      const ev = currentEvents[Number(card.dataset.vatsimIdx)];
+      if (ev) openVatsimDetail(ev, currentMode);
+    });
+
     function setActive(activeBtn) {
       tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === activeBtn));
     }
@@ -124,8 +189,10 @@
           }</div>`;
           return;
         }
+        currentEvents = events;
+        currentMode = mode;
         listSlot.innerHTML =
-          events.map((ev) => cardHtml(ev, mode)).join("") +
+          events.map((ev, i) => cardHtml(ev, mode, i)).join("") +
           `<div class="empty-state" style="border:none; padding:12px;">出典: <a href="${VATSIM_EVENTS_PAGE}" target="_blank" rel="noopener noreferrer">VATSIM 公式イベント一覧</a>${
             mode === "vatjpn"
               ? ` / <a href="${VATJPN_SITE}" target="_blank" rel="noopener noreferrer">VATJPN 公式サイト</a>`
@@ -191,12 +258,12 @@
         body.innerHTML = `<div class="vatsim-mini-empty">予定されているイベントはありません</div>`;
         return;
       }
-      body.innerHTML = events
-        .slice(0, 3)
-        .map((ev) => {
+      panel._miniEvents = events.slice(0, 3);
+      body.innerHTML = panel._miniEvents
+        .map((ev, i) => {
           const when = fmtMini.format(new Date(ev.startTime));
           const route = ev.airports?.length ? ev.airports.join(" → ") : "";
-          return `<a class="vatsim-mini-item" href="${escapeHtml(ev.link || VATSIM_EVENTS_PAGE)}" target="_blank" rel="noopener noreferrer">
+          return `<a class="vatsim-mini-item" data-mini-idx="${i}" href="${escapeHtml(ev.link || VATSIM_EVENTS_PAGE)}" target="_blank" rel="noopener noreferrer">
             <span class="vatsim-mini-when">${escapeHtml(when)}${isJapan(ev) ? " <span class='material-symbols-rounded ui-ic' aria-hidden='true'>flag</span>" : ""}</span>
             <span class="vatsim-mini-name">${escapeHtml(ev.name)}</span>
             ${route ? `<span class="vatsim-mini-route">${escapeHtml(route)}</span>` : ""}
@@ -216,6 +283,15 @@
     panel.className = "panel vatsim-mini-panel";
     panel.id = "vatsim-mini-panel";
     panel.innerHTML = `<div class="vatsim-mini-head"><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> VATSIMイベント</div><div class="vatsim-mini-body"><div class="vatsim-mini-empty">読み込み中...</div></div>`;
+    // 項目クリックで詳細ポップアップを出す (公式ページへはポップアップ内から)。
+    panel.addEventListener("click", (e) => {
+      const item = e.target.closest(".vatsim-mini-item");
+      if (!item) return;
+      const ev = (panel._miniEvents || [])[Number(item.dataset.miniIdx)];
+      if (!ev) return;
+      e.preventDefault();
+      openVatsimDetail(ev, isJapan(ev) ? "vatjpn" : "vatsim");
+    });
     popular.parentElement.insertBefore(panel, popular.nextSibling);
     loadMiniPanel(panel);
   }

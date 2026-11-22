@@ -277,3 +277,11 @@ img, video, iframe { max-width: 100%; }
 .material-symbols-rounded.ui-ic-fill { font-variation-settings: "FILL" 1; }
 .dm-avatar .material-symbols-rounded.ui-ic { font-size: 20px; vertical-align: middle; }
 .news-item-thumb-fallback .material-symbols-rounded.ui-ic { font-size: 22px; vertical-align: middle; }
+
+/* ---- VATSIM event detail popup (2026-11-22) ---- */
+.vatsim-event-card { cursor: pointer; }
+.vatsim-detail-modal { max-width: 520px; }
+.vatsim-detail-banner { display: block; width: 100%; border-radius: 12px; margin-bottom: 12px; }
+.vatsim-detail-title { margin: 10px 0 8px; font-size: 17px; line-height: 1.4; }
+.vatsim-detail-rows { display: grid; gap: 6px; font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+.vatsim-detail-desc { font-size: 13.5px; line-height: 1.7; white-space: pre-wrap; margin: 0 0 14px; }
