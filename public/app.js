@@ -1222,7 +1222,7 @@
     renderFeedList();
   }
 
-  async function updateProfile({ name, bio, homeBase, favoriteAnimeList, favoriteAircraftList, avatarFile }) {
+  async function updateProfile({ name, bio, homeBase, favoriteAnimeList, favoriteAircraftList, avatarFile, bannerFile }) {
     const form = new FormData();
     if (name !== undefined) form.append("name", name);
     if (bio !== undefined) form.append("bio", bio);
@@ -1230,6 +1230,7 @@
     if (favoriteAnimeList !== undefined) form.append("favoriteAnimeList", JSON.stringify(favoriteAnimeList));
     if (favoriteAircraftList !== undefined) form.append("favoriteAircraftList", JSON.stringify(favoriteAircraftList));
     if (avatarFile) form.append("avatar", avatarFile);
+    if (bannerFile) form.append("banner", bannerFile);
     const { user } = await api("/api/users/me", { method: "PATCH", body: form });
     state.user = user;
     state.posts.forEach((p) => {
@@ -5476,6 +5477,16 @@
       if (profileModalEl) {
         profileModalEl.style.setProperty("--profile-hue", Number.isFinite(user.hue) ? user.hue : 200);
       }
+      const bannerEl = overlay.querySelector(".profile-header-banner");
+      if (bannerEl) {
+        if (user.bannerUrl) {
+          bannerEl.style.backgroundImage = `url("${user.bannerUrl}")`;
+          bannerEl.classList.add("profile-header-banner--image");
+        } else {
+          bannerEl.style.backgroundImage = "";
+          bannerEl.classList.remove("profile-header-banner--image");
+        }
+      }
 
       const followBtn = slot.querySelector("#profile-follow-btn-slot");
       if (followBtn) {
@@ -7228,6 +7239,8 @@
   function openProfileModal() {
     let pendingAvatarFile = null;
     let pendingAvatarPreview = null;
+    let pendingBannerFile = null;
+    let pendingBannerPreview = null;
 
     const overlay = document.createElement("div");
     overlay.className = "modal-backdrop";
@@ -7241,6 +7254,12 @@
             <button type="button" class="btn btn-ghost" id="profile-pick-avatar">写真を変更</button>
             <input type="file" id="profile-avatar-input" accept="image/*" class="hidden-file-input" />
           </div>
+        </div>
+        <div class="field" style="margin-bottom:14px;">
+          <label>ヘッダー画像</label>
+          <div id="profile-banner-preview" class="profile-banner-preview">${state.user.bannerUrl ? `<img src="${escapeHtml(state.user.bannerUrl)}" alt="" />` : ""}</div>
+          <button type="button" class="btn btn-ghost" id="profile-pick-banner">ヘッダー画像を変更</button>
+          <input type="file" id="profile-banner-input" accept="image/*" class="hidden-file-input" />
         </div>
         <form id="profile-form">
           <div class="field">
@@ -7304,6 +7323,19 @@
       pendingAvatarPreview = URL.createObjectURL(file);
       document.getElementById("profile-avatar-preview").innerHTML =
         `<img class="avatar" style="width:72px;height:72px" src="${pendingAvatarPreview}" alt="preview" />`;
+    });
+
+    document.getElementById("profile-pick-banner").addEventListener("click", () => {
+      document.getElementById("profile-banner-input").click();
+    });
+
+    document.getElementById("profile-banner-input").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      pendingBannerFile = file;
+      pendingBannerPreview = URL.createObjectURL(file);
+      document.getElementById("profile-banner-preview").innerHTML =
+        `<img src="${pendingBannerPreview}" alt="preview" />`;
     });
 
     // 好きなアニメの行を増減する。最大10件(サーバー側の上限と合わせる)。
@@ -7378,6 +7410,7 @@
           favoriteAnimeList,
           favoriteAircraftList,
           avatarFile: pendingAvatarFile,
+          bannerFile: pendingBannerFile,
         });
         overlay.remove();
         renderMainScreen();

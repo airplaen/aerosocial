@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   favorite_aircraft TEXT,
   hue           INTEGER DEFAULT 200,
   avatar_path   TEXT,
+  banner_path   TEXT,
   password_hash TEXT NOT NULL,
   google_id     TEXT UNIQUE,
   fsa_auto_post INTEGER NOT NULL DEFAULT 1,
