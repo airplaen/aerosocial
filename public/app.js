@@ -4733,16 +4733,19 @@
     state.openComments.add(postId);
 
     const overlay = document.createElement("div");
-    overlay.className = "modal-backdrop";
+    overlay.className = "modal-backdrop post-detail-backdrop";
     overlay.innerHTML = `
-      <div class="modal" style="max-width:520px;">
+      <div class="modal post-detail-modal">
         <button class="modal-close" id="detail-close">✕</button>
+        <div class="post-detail-head">投稿</div>
         <div id="detail-post-slot"></div>
       </div>
     `;
     document.body.appendChild(overlay);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
     document.getElementById("detail-close").addEventListener("click", () => overlay.remove());
+    const onKey = (e) => { if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onKey); } };
+    document.addEventListener("keydown", onKey);
 
     function renderDetail() {
       if (!document.body.contains(overlay)) return;

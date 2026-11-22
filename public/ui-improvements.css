@@ -333,3 +333,26 @@ img, video, iframe { max-width: 100%; }
   /* スマホのボトムシート内ミニパネルはシート幅いっぱいに */
   .mobile-panel-sheet .vatsim-mini-panel { margin-top: 14px; }
 }
+
+/* ---- Post detail view: Twitter-like large view (2026-11-22) ---- */
+.post-detail-modal { max-width: 640px; padding: 22px 24px; }
+.post-detail-head { font-size: 17px; font-weight: 800; margin-bottom: 12px; }
+/* 詳細ではカードの箱を外し、本文を大きく見せる */
+.post-detail-modal .post {
+  background: transparent; border: none; box-shadow: none;
+  padding: 0; margin: 0; border-radius: 0;
+}
+.post-detail-modal .post-text { font-size: 17.5px; line-height: 1.85; }
+.post-detail-modal .post-image { max-height: 68vh; }
+.post-detail-modal .post-actions .action-btn { min-height: 44px; padding: 8px 18px; font-size: 14px; }
+.post-detail-modal .comments { margin-top: 8px; }
+@media (max-width: 899.98px) {
+  /* スマホでは全画面表示にする */
+  .post-detail-backdrop { padding: 0; align-items: stretch; }
+  .post-detail-modal {
+    max-width: none; width: 100%;
+    height: 100dvh; max-height: none;
+    border: none; border-radius: 0;
+    padding: 18px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+}
