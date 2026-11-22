@@ -208,6 +208,9 @@
 
   let ws = null;
   let wsRetryTimer = null;
+  const WS_RETRY_BASE_MS = 3000;
+  const WS_RETRY_MAX_MS = 60000;
+  let wsRetryDelay = WS_RETRY_BASE_MS;
 
   // Max number of images allowed on a single post (kept in sync with the
   // server-side limit in middleware/upload.js).
@@ -353,6 +356,7 @@
   function fmtTime(iso) {
     if (!iso) return "";
     const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
     const now = new Date();
     const diffMs = now - d;
     const diffMin = Math.floor(diffMs / 60000);
@@ -370,6 +374,7 @@
   // sense for a future event's start time).
   function fmtEventDateTime(iso) {
     if (!iso) return "";
+    if (Number.isNaN(new Date(iso).getTime())) return "";
     return new Date(iso).toLocaleString("ja-JP", {
       year: "numeric", month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
     });
@@ -455,8 +460,14 @@
   }
 
   function toast(msg) {
+    // Cap the stack (max 3) so rapid actions don't bury the screen, and
+    // expose the message via a polite live region for assistive tech.
+    const existing = document.querySelectorAll(".toast");
+    existing.forEach((el, i) => { if (i < existing.length - 2) el.remove(); });
     const el = document.createElement("div");
     el.className = "toast";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
     el.textContent = msg;
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 2600);
@@ -1255,6 +1266,7 @@
       state.wsConnected = true;
       updateWsIndicator();
       if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
+      wsRetryDelay = WS_RETRY_BASE_MS; // connection succeeded - reset backoff
     };
 
     ws.onclose = () => {
@@ -1262,7 +1274,11 @@
       updateWsIndicator();
       // Always retry now (see the connectWS() comment above) — previously
       // gated on state.user since a logged-out socket had nothing to do.
-      wsRetryTimer = setTimeout(connectWS, 3000);
+      // Exponential backoff (capped) instead of a fixed 3s retry, same
+      // pattern as the P2PQuake socket below: a fixed short delay turns
+      // any server outage into a reconnect storm from every open tab.
+      wsRetryTimer = setTimeout(connectWS, wsRetryDelay);
+      wsRetryDelay = Math.min(wsRetryDelay * 2, WS_RETRY_MAX_MS);
     };
 
     ws.onerror = () => ws.close();
@@ -3811,6 +3827,26 @@
   });
 
   function renderFeedList() {
+    // Preserve comment drafts and the scroll position across the
+    // re-render: likes/votes/new posts arriving over WS re-render the
+    // whole list, which used to wipe any comment being typed and make
+    // the page jump. Restore runs in rAF, after whichever return path
+    // below rebuilds the list.
+    const commentDrafts = {};
+    document.querySelectorAll("#feed-list .post").forEach((el) => {
+      const input = el.querySelector(".comment-form input, .comment-form textarea");
+      if (input && input.value) commentDrafts[el.dataset.postId] = input.value;
+    });
+    const prevScrollY = window.scrollY;
+    requestAnimationFrame(() => {
+      document.querySelectorAll("#feed-list .post").forEach((el) => {
+        const draft = commentDrafts[el.dataset.postId];
+        if (!draft) return;
+        const input = el.querySelector(".comment-form input, .comment-form textarea");
+        if (input && !input.value) input.value = draft;
+      });
+      if (Math.abs(window.scrollY - prevScrollY) > 4) window.scrollTo(0, prevScrollY);
+    });
     renderFeedStats();
     const list = document.getElementById("feed-list");
     if (!list) return;
