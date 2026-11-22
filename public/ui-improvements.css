@@ -285,3 +285,18 @@ img, video, iframe { max-width: 100%; }
 .vatsim-detail-title { margin: 10px 0 8px; font-size: 17px; line-height: 1.4; }
 .vatsim-detail-rows { display: grid; gap: 6px; font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
 .vatsim-detail-desc { font-size: 13.5px; line-height: 1.7; white-space: pre-wrap; margin: 0 0 14px; }
+
+/* ---- Stylish scrollbars (2026-11-22) ---- */
+/* 細くて丸い、ブランド色グラデーションのつまみ。Firefox向けも併記。 */
+* { scrollbar-width: thin; scrollbar-color: rgba(110, 130, 190, 0.5) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #5b8cff, #9b6bff);
+  border: none;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #74a2ff, #ad85ff); }
+::-webkit-scrollbar-thumb:active { background: linear-gradient(180deg, #4a7bf0, #8a5cf0); }
+::-webkit-scrollbar-corner { background: transparent; }
+.sidebar::-webkit-scrollbar { width: 5px; }
