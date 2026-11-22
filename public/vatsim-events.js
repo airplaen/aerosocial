@@ -164,4 +164,76 @@
 
   // 既に開いているモーダルがあればそれも対象にする。
   enhanceEventsModal(document.querySelector(".events-modal"));
+
+  // ---- 右サイドバーのミニパネル (直近のVATSIMイベント) ----
+  const fmtMini = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  function isJapan(ev) {
+    if ((ev.divisions || []).includes("VATJPN")) return true;
+    if ((ev.airports || []).some((icao) => /^RJ/i.test(icao))) return true;
+    return /japan/i.test(ev.organisers || "");
+  }
+
+  async function loadMiniPanel(panel) {
+    const body = panel.querySelector(".vatsim-mini-body");
+    if (!body) return;
+    try {
+      const res = await fetch(`${API_BASE}?scope=all`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { events } = await res.json();
+      if (!events?.length) {
+        body.innerHTML = `<div class="vatsim-mini-empty">予定されているイベントはありません</div>`;
+        return;
+      }
+      body.innerHTML = events
+        .slice(0, 3)
+        .map((ev) => {
+          const when = fmtMini.format(new Date(ev.startTime));
+          const route = ev.airports?.length ? ev.airports.join(" → ") : "";
+          return `<a class="vatsim-mini-item" href="${escapeHtml(ev.link || VATSIM_EVENTS_PAGE)}" target="_blank" rel="noopener noreferrer">
+            <span class="vatsim-mini-when">${escapeHtml(when)}${isJapan(ev) ? " 🗾" : ""}</span>
+            <span class="vatsim-mini-name">${escapeHtml(ev.name)}</span>
+            ${route ? `<span class="vatsim-mini-route">${escapeHtml(route)}</span>` : ""}
+          </a>`;
+        })
+        .join("");
+    } catch (_) {
+      body.innerHTML = `<div class="vatsim-mini-empty">取得できませんでした</div>`;
+    }
+  }
+
+  function injectMiniPanel() {
+    if (document.getElementById("vatsim-mini-panel")) return;
+    const popular = document.querySelector(".popular-flights");
+    if (!popular || !popular.parentElement) return;
+    const panel = document.createElement("div");
+    panel.className = "panel vatsim-mini-panel";
+    panel.id = "vatsim-mini-panel";
+    panel.innerHTML = `<div class="vatsim-mini-head">🛩 VATSIMイベント</div><div class="vatsim-mini-body"><div class="vatsim-mini-empty">読み込み中...</div></div>`;
+    popular.parentElement.insertBefore(panel, popular.nextSibling);
+    loadMiniPanel(panel);
+  }
+
+  let injectTimer = null;
+  const shellObserver = new MutationObserver(() => {
+    if (injectTimer) return;
+    injectTimer = setTimeout(() => {
+      injectTimer = null;
+      injectMiniPanel();
+    }, 300);
+  });
+  shellObserver.observe(document.body, { childList: true, subtree: true });
+  injectMiniPanel();
+
+  // サーバー側の自動更新 (15分) に合わせてパネルも更新する。
+  setInterval(() => {
+    const panel = document.getElementById("vatsim-mini-panel");
+    if (panel) loadMiniPanel(panel);
+  }, 15 * 60 * 1000);
 })();
