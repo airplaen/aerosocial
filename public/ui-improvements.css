@@ -1,16 +1,13 @@
 /* =====================================================================
-   AeroSocial — Muse design (v3)
+   AeroSocial — Muse design (v4, PCレイアウト hotfix)
    ---------------------------------------------------------------------
-   設計: 「1画面1目的、フィードが主役」
-   - 左端にナビレール (従来トップバーに並んでいたボタンを縦に集約)
-   - 上部はロゴと接続状態だけの静かなヘッダーに
-   - 中央はフィード専用、右は「今の情報」だけのコンパクトなサイド
-   - フライトカードは搭乗券スタイルに (ルートを大きく、点線で結ぶ)
+   v3 の左レールがPCで崩れた原因: .topbar に transform が付いているため、
+   子要素の position:fixed がビューポートではなく .topbar 基準になり、
+   小さな箱に潰れて浮いて見えた (実画面で確認)。
 
-   実装方法: app.js / styles.css は無改造。このシートが既存DOMを
-   CSSだけで再配置する (ナビレール化は .topbar-actions の固定配置)。
-   ボタンの機能・イベントは元のまま一切変わらない。
-   戻すときは index.html の <link> を消すだけ。
+   v4 の直し方: fixed をやめ、.app-shell 自体をグリッドにして
+   .topbar を「sticky な左サイドバー」として配置し直す。transform の
+   影響を受けず、ブランドロゴもサイドバー最上部に自然に収まる。
    ===================================================================== */
 
 /* ================= 基本 (v1/v2から継承) ================= */
@@ -90,14 +87,14 @@ img, video, iframe { max-width: 100%; }
   }
   .sidebar-left { flex-basis: auto; }
   .sidebar .quake-panel, .sidebar .events-sidebar-panel { box-shadow: none; }
+  .main-grid .sidebar:not(.sidebar-left) > * { margin-bottom: 14px; }
 }
 @media (min-width: 900px) and (max-width: 1240px) {
   .main-grid { grid-template-columns: 220px minmax(0, 1fr) 260px; gap: 16px; }
   .app-shell { padding-inline: 16px; }
-  .topbar-btn { padding: 6px 9px; font-size: 12.5px; }
 }
 
-/* トップバーは1行固定 (レール化しない幅では横スクロールで逃がす) */
+/* トップバーは1行固定 (サイドバー化しない幅では横スクロールで逃がす) */
 .topbar { flex-wrap: nowrap; }
 @media (max-width: 1199.98px) {
   .topbar-actions {
@@ -106,6 +103,7 @@ img, video, iframe { max-width: 100%; }
   }
   .topbar-actions::-webkit-scrollbar { display: none; }
   .topbar-btn.icon-only { width: 44px; height: 44px; padding: 10px; }
+  .topbar-btn { padding: 6px 9px; font-size: 12.5px; }
 }
 
 /* ================= 投稿カード / 空状態 ================= */
@@ -158,28 +156,52 @@ img, video, iframe { max-width: 100%; }
 .flight-stats .stat b { font-size: 16px; display: block; }
 .flight-stats .stat { color: var(--text-dim); font-size: 11.5px; }
 
-/* ================= 左ナビレール (1200px〜) =================
-   .topbar-actions を固定配置の縦レールに変形する。ボタンの中身・
-   クリック動作は元のまま。画面が狭い幅では従来の上部バーに戻る。 */
+/* ================= 左サイドバー (1200px〜) =================
+   fixed を使わず、.app-shell のグリッド1列目に .topbar を丸ごと
+   sticky 配置する。ブランド → 接続状態 → ナビボタン → アバターの
+   順に縦に並ぶ (DOM順そのまま)。 */
 @media (min-width: 1200px) {
-  body { padding-left: 216px; }
+  .app-shell {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    column-gap: 24px;
+    align-items: start;
+    max-width: 1520px;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 20px 14px 16px;
+    margin: 0;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    background: var(--bg);
+  }
+  /* 下端の横グラデーション線は、サイドバーでは右端の縦線に変える */
+  .topbar::after {
+    left: auto; right: -1px; top: 0; bottom: auto;
+    width: 2px; height: 100%;
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-violet) 45%, var(--accent-2) 100%);
+  }
+  .brand { padding: 2px 6px; }
+  .ws-indicator { padding: 0 6px; }
 
   .topbar-actions {
-    position: fixed;
-    left: 0; top: 0; bottom: 0;
-    width: 216px;
-    z-index: 30;
     display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
-    padding: 84px 12px 16px;
-    background: var(--bg);
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-    scrollbar-width: thin;
+    flex: 1;
+    overflow: visible;
   }
-  /* レール内のボタンは「アイコン+ラベル」の行メニューに */
   .topbar-actions .topbar-btn {
     width: 100%;
     justify-content: flex-start;
@@ -189,10 +211,7 @@ img, video, iframe { max-width: 100%; }
     border-color: transparent;
     background: transparent;
   }
-  .topbar-actions .topbar-btn:hover {
-    background: var(--panel-2);
-    color: var(--text);
-  }
+  .topbar-actions .topbar-btn:hover { background: var(--panel-2); color: var(--text); }
   .topbar-actions .topbar-btn.icon-only {
     width: 100%; height: auto;
     justify-content: flex-start;
@@ -200,28 +219,18 @@ img, video, iframe { max-width: 100%; }
     border-radius: 12px;
   }
   .topbar-actions .topbar-divider { display: none; }
-  /* アバター (プロフィール入口) はレール最下部へ */
   .topbar-actions .avatar {
     margin-top: auto;
     width: 40px; height: 40px;
     align-self: flex-start;
     margin-left: 6px;
   }
-  /* ヘッダーはロゴと接続状態だけの静かなバーに */
-  .topbar { justify-content: flex-start; gap: 16px; }
 
-  /* レール分を差し引いた3カラム配分 */
+  /* サイドバー分を差し引いた内側3カラム */
   .main-grid { grid-template-columns: 232px minmax(0, 640px) 280px; }
-  .app-shell { max-width: 1280px; }
 }
 @media (min-width: 1600px) {
   .main-grid { grid-template-columns: 248px minmax(0, 700px) 300px; }
-  .app-shell { max-width: 1400px; }
-}
-
-/* 右サイドは「今の情報」だけ: パネル間隔を詰めてコンパクトに */
-@media (min-width: 900px) {
-  .main-grid .sidebar:not(.sidebar-left) > * { margin-bottom: 14px; }
 }
 
 /* ================= モバイル ================= */
