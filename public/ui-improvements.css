@@ -238,6 +238,9 @@ img, video, iframe { max-width: 100%; }
   .main-grid { grid-template-columns: 248px minmax(0, 700px) 300px; }
 }
 
+/* 接続状態のドットは表示しない (ユーザー要望: サイドバーに出る緑の点が不要) */
+.ws-indicator { display: none !important; }
+
 /* ================= VATSIM / VATJPN イベント (vatsim-events.js) ================= */
 .events-modal .tabs { overflow-x: auto; scrollbar-width: none; }
 .events-modal .tabs::-webkit-scrollbar { display: none; }
