@@ -34,6 +34,7 @@ function publicUser(row) {
     homeBase: row.home_base,
     bio: row.bio,
     favoriteAnimeList: parseAnimeList(row.favorite_anime),
+    favoriteAircraftList: parseAnimeList(row.favorite_aircraft),
     hue: row.hue,
     avatarUrl: row.avatar_path ? `/uploads/${row.avatar_path}` : null,
     joined: row.created_at,
@@ -50,10 +51,10 @@ router.get("/me", requireAuth, async (req, res) => {
 // PATCH /api/users/me
 // Accepts either JSON or multipart/form-data (multipart is required to
 // include a new avatar image under the "avatar" field).
-// Fields: name?, homeBase?, bio?, favoriteAnimeList? (JSON array string), hue?, currentPassword?, newPassword?, avatar? (file)
+// Fields: name?, homeBase?, bio?, favoriteAnimeList? / favoriteAircraftList? (JSON array string), hue?, currentPassword?, newPassword?, avatar? (file)
 router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
   try {
-    const { name, homeBase, bio, favoriteAnimeList, hue, currentPassword, newPassword } = req.body;
+    const { name, homeBase, bio, favoriteAnimeList, favoriteAircraftList, hue, currentPassword, newPassword } = req.body;
 
     const existing = await pool.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
     const user = existing.rows[0];
@@ -99,6 +100,26 @@ router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
         .slice(0, 10) // 上限10件
         .map((t) => t.slice(0, 100));
       fields.push(`favorite_anime = $${idx++}`);
+      params.push(JSON.stringify(cleaned));
+    }
+
+    if (favoriteAircraftList !== undefined) {
+      // 好きな飛行機。検証・保存形式は favoriteAnimeList と同じ。
+      let list;
+      try {
+        list = JSON.parse(favoriteAircraftList);
+      } catch {
+        return res.status(400).json({ error: "favoriteAircraftListの形式が不正です。" });
+      }
+      if (!Array.isArray(list)) {
+        return res.status(400).json({ error: "favoriteAircraftListは配列で指定してください。" });
+      }
+      const cleaned = list
+        .map((t) => String(t || "").trim())
+        .filter(Boolean)
+        .slice(0, 10) // 上限10件
+        .map((t) => t.slice(0, 100));
+      fields.push(`favorite_aircraft = $${idx++}`);
       params.push(JSON.stringify(cleaned));
     }
 

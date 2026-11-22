@@ -62,6 +62,15 @@ function main() {
     if (!/duplicate column/i.test(err.message)) throw err;
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id) WHERE google_id IS NOT NULL");
+  // For databases created before the favorite-aircraft feature existed:
+  // same pattern as avatar_path above.
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN favorite_aircraft TEXT");
+    console.log("Added favorite_aircraft column to users.");
+  } catch (err) {
+    if (!/duplicate column/i.test(err.message)) throw err;
+  }
+
 
   // For databases created before the follow feature existed: schema.sql's
   // CREATE TABLE IF NOT EXISTS above only takes effect if db.exec(sql) made
