@@ -250,6 +250,20 @@ img, video, iframe { max-width: 100%; }
   border-radius: 10px; margin-bottom: 10px; display: block;
 }
 .vatsim-event-card .event-card-bottom { margin-top: 10px; }
+.vatsim-mini-panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px;
+}
+.vatsim-mini-head { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.vatsim-mini-item {
+  display: block; padding: 7px 0;
+  border-top: 1px dashed var(--border);
+  text-decoration: none; color: var(--text);
+}
+.vatsim-mini-when { color: var(--accent-2); font-size: 12px; font-weight: 700; }
+.vatsim-mini-name { display: block; font-size: 13px; line-height: 1.5; }
+.vatsim-mini-route { color: var(--text-dim); font-size: 12px; }
+.vatsim-mini-empty { color: var(--text-dim); font-size: 12.5px; padding: 6px 0; }
 
 /* ================= モバイル ================= */
 @media (max-width: 899.98px) {
