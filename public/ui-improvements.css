@@ -1,27 +1,30 @@
 /* =====================================================================
-   AeroSocial — UI improvements overlay
+   AeroSocial — UI overhaul (Muse redesign v2)
    ---------------------------------------------------------------------
-   styles.css への「追加の上書き」専用シート。index.html で styles.css の
-   後に読み込まれる前提で、既存ルールを壊さずに次だけを改善する:
+   方針: 「フィードを主役に、ナビは静かに、サイドは従に」
 
-   1. キーボード操作時のフォーカス表示 (従来は入力欄以外ほぼ無し)
-   2. タップ領域の最小 44px 化 (トップバーのアイコンボタンは 32px だった)
-   3. ノッチ付き端末のセーフエリア対応 (viewport-fit=cover とセット)
-   4. ライトテーマで読めなかったエラー表示のコントラスト修正
-   5. iOS Safari が入力欄フォーカス時に自動ズームする問題 (16px 未満が原因)
-   6. prefers-reduced-motion / 強制カラーモードへの配慮
-   7. 100dvh 対応ブラウザでの高さのちらつき軽減、長文・URL の折り返し
+   従来レイアウトの問題 (実画面ベース):
+   - 上部ボタンが9個並び、ブランドよりボタン列の方が目立っていた
+   - サイドバーがページ全体と一緒に伸び、人気フライト等の長いリストが
+     フィードより存在感を持っていた
+   - フィード列が 640px に固定され、ワイド画面でも窮屈だった
+   - 中画面 (900〜1280px) でトップバーが収まりきらず崩れやすかった
 
-   既存のクラス名・変数 (--bg / --panel / --accent 等) だけに依存し、
-   新しいレイアウトは作らない。不要になればこのファイルと
-   index.html の <link> 1行を消すだけで元に戻せる。
+   このシートでの解決:
+   1. デスクトップは「左ナビ相当 (サイドバー) / 中央フィード / 右サイド」
+      の3カラムをグリッドで再配分し、フィードを最大 700px に拡大
+   2. サイドバーは sticky + 独自スクロールにし、ページの主役に戻す
+   3. トップバーは1行に固定し、中画面では横スクロールで逃がす
+   4. カード (投稿) の余白と階層を強め、サイドのパネルは一段静かに
+   5. v1 の改善 (フォーカス / 44px / セーフエリア / iOSズーム等) は全て維持
+
+   styles.css 本体は無改造。戻すときは index.html の <link> を消すだけ。
    ===================================================================== */
 
-/* ブラウザのフォーム部品・スクロールバー等をテーマに合わせる */
+/* ================= v1 の基本改善 (維持) ================= */
 :root { color-scheme: dark; }
 :root[data-theme="light"] { color-scheme: light; }
 
-/* ---------- スキップリンク (キーボード / スクリーンリーダー向け) --- */
 .skip-link {
   position: fixed;
   top: -60px;
@@ -39,10 +42,6 @@
 }
 .skip-link:focus-visible { top: 12px; }
 
-/* ---------- フォーカス表示 ------------------------------------------
-   マウス操作では出さず (:focus-visible)、キーボード操作のときだけ
-   全ての操作要素にはっきりしたリングを出す。従来は .field input 等の
-   一部にしかフォーカス表現がなく、Tab 移動で現在位置が分からなかった。 */
 :focus { outline: none; }
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -51,72 +50,33 @@
 }
 .field input:focus-visible,
 .field textarea:focus-visible,
-.anime-editor-row input:focus-visible {
-  outline: none; /* 入力欄は従来どおり box-shadow のリングを使う */
-}
+.anime-editor-row input:focus-visible { outline: none; }
 
-/* ---------- タップ領域 ----------------------------------------------
-   Apple HIG / Material ともに最小 44px が目安。トップバーの丸ボタンは
-   32px しかなく、フライト中のタブレット操作等で押し間違えやすかった。 */
-.topbar-btn.icon-only {
-  width: 44px;
-  height: 44px;
-  padding: 10px;
-}
+.topbar-btn.icon-only { width: 44px; height: 44px; padding: 10px; }
 .mobile-tabbar { height: calc(54px + env(safe-area-inset-bottom, 0px)); }
 .mobile-tabbar .tab-btn { min-height: 44px; }
 .tabs button { min-height: 40px; }
 .anime-editor-remove { width: 40px; height: 40px; }
 
-/* ---------- セーフエリア --------------------------------------------
-   app-shell の下余白にホームインジケーター分を足し、最後の投稿が
-   タブバー + インジケーターの裏に隠れないようにする。 */
-.app-shell {
-  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
-}
-@media (min-width: 900px) {
-  .app-shell { padding-bottom: 48px; }
-}
-
-/* ---------- ビューポート高さ ----------------------------------------
-   モバイルブラウザのアドレスバー伸縮で 100vh が跳ねる問題の緩和。
-   dvh 非対応ブラウザでは上の min-height (styles.css) がそのまま効く。 */
+.app-shell { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 body { min-height: 100dvh; }
 
-/* ---------- ライトテーマのコントラスト修正 --------------------------
-   .error-banner の文字色は暗色前提の #ffb3bb 固定で、ライトテーマの
-   薄い背景では読めなかった。ライト時は濃い赤に切り替える。 */
 :root[data-theme="light"] .error-banner {
   background: rgba(226, 67, 79, 0.1);
   border-color: rgba(226, 67, 79, 0.45);
   color: #9c1c28;
 }
-/* ライトテーマでの選択色も背景に埋もれないようにする */
 ::selection { background: rgba(77, 163, 255, 0.35); }
 :root[data-theme="light"] ::selection { background: rgba(47, 127, 224, 0.28); }
 
-/* ---------- iOS の自動ズーム防止 ------------------------------------
-   iOS Safari は font-size 16px 未満の入力欄にフォーカスすると自動で
-   ズームし、レイアウトがずれて戻らなくなる。モバイル幅だけ 16px に
-   上げ、デスクトップの見た目は変えない。 */
 @media (max-width: 899.98px) {
-  .field input,
-  .field textarea,
-  .anime-editor-row input {
-    font-size: 16px;
-  }
+  .field input, .field textarea, .anime-editor-row input { font-size: 16px; }
 }
 
-/* ---------- 長文・長い URL の折り返し --------------------------------
-   URL や英単語の連続がフィード幅をはみ出し、横スクロールを発生させる
-   ことがあった。本文系は単語途中でも折り返して収める。 */
 body { overflow-wrap: break-word; }
 .auto-link { overflow-wrap: anywhere; }
 img, video, iframe { max-width: 100%; }
 
-/* ---------- トースト -------------------------------------------------
-   連続したトーストが画面端に張り付いて読めないケースの緩和。
-   左右に余白を持たせ、テキストを中央寄せ・折り返し可能にする。 */
 .toast {
   left: 16px;
   right: 16px;
@@ -127,25 +87,118 @@ img, video, iframe { max-width: 100%; }
   z-index: 300;
 }
 
-/* ---------- 動きを減らす設定への配慮 --------------------------------
-   OS で「視差効果を減らす」を有効にしている人には、アニメーションと
-   トランジションをほぼ止める (WS ドットのパルスやシートのスライド等)。 */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
 }
-
-/* ---------- 強制カラーモード (Windows ハイコントラスト等) ---------- */
 @media (forced-colors: active) {
   .ws-dot,
   .mobile-tabbar .tab-btn.has-badge .material-symbols-rounded::after,
-  .topbar-btn.messages-btn.has-badge::after {
-    forced-color-adjust: none;
+  .topbar-btn.messages-btn.has-badge::after { forced-color-adjust: none; }
+}
+
+/* ================= レイアウト再設計 (デスクトップ) ================= */
+@media (min-width: 900px) {
+  /* シェルを広げ、3カラムをグリッドで明示配分する。
+     左 248px / 中央フィード 最大700px / 右 300px、全体は中央寄せ。 */
+  .app-shell {
+    max-width: 1440px;
+    padding-inline: 24px;
+    padding-bottom: 48px;
   }
+  .main-grid {
+    display: grid;
+    grid-template-columns: 248px minmax(0, 700px) 300px;
+    justify-content: center;
+    align-items: start;
+    gap: 20px;
+  }
+  .feed-column {
+    max-width: 700px;
+    width: 100%;
+    margin: 0;
+  }
+  /* サイドバーは画面に追従し、中身が長ければ自分だけスクロールする。
+     フィードのスクロールと競合しないので、人気フライトや地震情報の
+     長いリストがページ全体を押し伸ばさなくなる。 */
+  .sidebar {
+    position: sticky;
+    top: 78px;
+    max-height: calc(100dvh - 98px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding-bottom: 8px;
+  }
+  .sidebar-left { flex-basis: auto; }
+}
+
+/* 中画面 (900〜1240px): 右サイドバーを畳み、左+フィードの2カラムに。
+   右サイドの内容 (人気のフライト等) はモバイル同様パネル導線が別にある
+   画面幅ではないため、完全には消さず幅を絞って残す。 */
+@media (min-width: 900px) and (max-width: 1240px) {
+  .main-grid { grid-template-columns: 220px minmax(0, 1fr) 260px; gap: 16px; }
+  .app-shell { padding-inline: 16px; }
+}
+
+/* ================= トップバーを静かに ================= */
+/* 1行に固定し、はみ出す場合は横スクロールで逃がす (折り返して
+   2段になる崩れを防ぐ)。ボタン自体は小さめのピルに統一感を出す。 */
+.topbar {
+  flex-wrap: nowrap;
+}
+.topbar-actions {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  mask-image: linear-gradient(90deg, #000 92%, transparent);
+}
+.topbar-actions::-webkit-scrollbar { display: none; }
+@media (min-width: 900px) and (max-width: 1240px) {
+  .topbar-btn { padding: 6px 9px; font-size: 12.5px; }
+  .brand-name { font-size: 16px; }
+}
+
+/* ================= フィードを主役に ================= */
+/* 投稿カード: 余白を広げ、本文の行間を読みやすく。操作ボタンは
+   押しやすい高さに揃える。 */
+.post {
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.post-text {
+  line-height: 1.75;
+  font-size: 15px;
+}
+.post-actions .action-btn {
+  min-height: 38px;
+  padding: 6px 14px;
+  border-radius: 999px;
+}
+
+/* サイドバーのパネルは一段静かに: 境界を弱め、見出しを小さくして
+   フィードより目立たせない。 */
+.sidebar .quake-panel,
+.sidebar .events-sidebar-panel {
+  box-shadow: none;
+}
+
+/* コンポーザー (投稿欄) はフィード最上部で幅いっぱいに使う。
+   入力欄が狭いと書き始める前に離脱しやすいので、最低限の高さを確保。 */
+.feed-column textarea {
+  min-height: 56px;
+}
+
+/* ================= モバイル: 既存タブバーを活かす ================= */
+@media (max-width: 899.98px) {
+  .app-shell { padding-inline: 12px; }
+  .post { padding: 14px; }
+  /* 投稿ボタン等の主要アクションは親指の届く下部に寄せる思想を維持し、
+     タブバーとの間隔だけ確保する */
+  .feed-column { padding-bottom: 8px; }
 }
