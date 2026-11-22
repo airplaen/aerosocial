@@ -20,6 +20,7 @@ const settingsRoutes = require("./routes/settings");
 const adminRoutes = require("./routes/admin");
 const adsRoutes = require("./routes/ads");
 const eventRoutes = require("./routes/events");
+const vatsimEventRoutes = require("./routes/vatsimEvents");
 const animeImageRoutes = require("./routes/animeImage");
 const newsRoutes = require("./routes/news");
 const memoRoutes = require("./routes/memos");
@@ -183,6 +184,7 @@ app.use("/api/youtube", youtubeLimiter, youtubeRoutes);
 
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/vatsim", vatsimEventRoutes);
 app.use("/api/memos", memoRoutes);
 app.use("/api/logbook", logbookRoutes);
 
