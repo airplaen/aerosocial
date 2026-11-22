@@ -1222,12 +1222,13 @@
     renderFeedList();
   }
 
-  async function updateProfile({ name, bio, homeBase, favoriteAnimeList, avatarFile }) {
+  async function updateProfile({ name, bio, homeBase, favoriteAnimeList, favoriteAircraftList, avatarFile }) {
     const form = new FormData();
     if (name !== undefined) form.append("name", name);
     if (bio !== undefined) form.append("bio", bio);
     if (homeBase !== undefined) form.append("homeBase", homeBase);
     if (favoriteAnimeList !== undefined) form.append("favoriteAnimeList", JSON.stringify(favoriteAnimeList));
+    if (favoriteAircraftList !== undefined) form.append("favoriteAircraftList", JSON.stringify(favoriteAircraftList));
     if (avatarFile) form.append("avatar", avatarFile);
     const { user } = await api("/api/users/me", { method: "PATCH", body: form });
     state.user = user;
@@ -4926,6 +4927,105 @@
     }
   }
 
+  // プロフィールの「好きな飛行機」タブ。仕組みは「好きなアニメ」と同じで、
+  // タイトルを日本語版Wikipediaで引き、画像+概要のカードを並べる。
+  function renderAircraftSidebar(container, titles) {
+    if (!container) return;
+    const list = (titles || []).filter(Boolean);
+    if (!list.length) {
+      container.innerHTML = `<div class="empty-state">好きな飛行機が登録されていません。</div>`;
+      return;
+    }
+    container.innerHTML = list.map((_, i) => `<div id="aircraft-card-slot-${i}"></div>`).join("");
+    list.forEach((title, i) => {
+      const slot = container.querySelector(`#aircraft-card-slot-${i}`);
+      if (slot) renderAircraftCard(slot, title);
+    });
+  }
+
+  // ---------------------------------------------------------------- favorite aircraft card
+  // renderAnimeCard の飛行機版。Wikipediaの「概要」セクションがあればそれを、
+  // 無ければリード文(extract)を説明として使う。画像のフォールバックは
+  // アニメ専用のJikanには無いので、Wikipediaのサムネイルのみ。
+  async function renderAircraftCard(container, title) {
+    container.innerHTML = `
+      <div class="anime-card">
+        <div class="anime-card-body">
+          <div class="anime-card-label">好きな飛行機</div>
+          <div class="anime-card-title">${escapeHtml(title)}</div>
+          <div class="anime-card-loading">Wikipediaから情報を取得中...</div>
+        </div>
+      </div>
+    `;
+
+    try {
+      const searchRes = await fetch(
+        `https://ja.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*&srlimit=1&srsearch=${encodeURIComponent(title)}`
+      );
+      const searchData = await searchRes.json();
+      const hit = searchData?.query?.search?.[0];
+      const pageTitle = hit ? hit.title : title;
+      const pageUrl = `https://ja.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}`;
+
+      let image = null;
+      let fallbackExtract = "";
+      try {
+        const summaryRes = await fetch(
+          `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle.replace(/ /g, "_"))}`
+        );
+        if (summaryRes.ok) {
+          const summaryData = await summaryRes.json();
+          image = summaryData.originalimage?.source || summaryData.thumbnail?.source || null;
+          fallbackExtract = summaryData.extract || "";
+        }
+      } catch { /* image/extract are optional */ }
+
+      let synopsis = fallbackExtract;
+      try {
+        const sectionsRes = await fetch(
+          `https://ja.wikipedia.org/w/api.php?action=parse&format=json&origin=*&prop=sections&page=${encodeURIComponent(pageTitle)}`
+        );
+        const sectionsData = await sectionsRes.json();
+        const section = sectionsData?.parse?.sections?.find((s) => s.line === "概要");
+        if (section) {
+          const textRes = await fetch(
+            `https://ja.wikipedia.org/w/api.php?action=parse&format=json&origin=*&prop=text&page=${encodeURIComponent(pageTitle)}&section=${section.index}`
+          );
+          const textData = await textRes.json();
+          const html = textData?.parse?.text?.["*"] || "";
+          const plain = html
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+            .replace(/<[^>]+>/g, "")
+            .replace(/\[\d+\]/g, "")
+            .replace(/\s+\n/g, "\n")
+            .trim();
+          if (plain) synopsis = plain;
+        }
+      } catch { /* fall back to fallbackExtract set above */ }
+
+      container.innerHTML = `
+        <div class="anime-card${image ? " anime-card--has-image" : ""}">
+          ${image ? `<img class="anime-card-bg-image" src="${escapeHtml(image)}" alt="" aria-hidden="true" />` : ""}
+          ${image ? `<div class="anime-card-overlay"></div>` : ""}
+          <div class="anime-card-body">
+            <div class="anime-card-label">好きな飛行機</div>
+            <div class="anime-card-title"><a href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(pageTitle)}</a></div>
+            ${synopsis ? `<div class="anime-card-synopsis">${escapeHtml(synopsis)}</div>` : ""}
+          </div>
+        </div>
+      `;
+    } catch {
+      container.innerHTML = `
+        <div class="anime-card">
+          <div class="anime-card-body">
+            <div class="anime-card-label">好きな飛行機</div>
+            <div class="anime-card-title">${escapeHtml(title)}</div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
   // ---------------------------------------------------------------- shared stat/chart widgets
   // Used by the profile's ログブック/実績 tabs and the ランキング modal.
   // Reuses the same visual language (and CSS classes) as the admin panel's
@@ -5297,6 +5397,7 @@
         <div id="profile-tab-followers" class="profile-tab-panel" hidden></div>
         <div id="profile-tab-following" class="profile-tab-panel" hidden></div>
         <div id="profile-tab-anime" class="profile-tab-panel" hidden></div>
+        <div id="profile-tab-aircraft" class="profile-tab-panel" hidden></div>
       </div>
     `;
     document.body.appendChild(overlay);
@@ -5341,6 +5442,7 @@
       let followState = { followerCount: follow.followerCount, isFollowedByMe: follow.isFollowedByMe };
       const followingCount = follow.followingCount;
       const animeList = (user.favoriteAnimeList || []).filter(Boolean);
+      const aircraftList = (user.favoriteAircraftList || []).filter(Boolean);
 
       const slot = overlay.querySelector("#profile-view-slot");
       if (!slot) return;
@@ -5413,6 +5515,7 @@
         { id: "following", label: `フォロー中 ${followingCount}` },
       ];
       if (animeList.length) tabDefs.push({ id: "anime", label: "好きなアニメ", icon: "movie" });
+      if (aircraftList.length) tabDefs.push({ id: "aircraft", label: "好きな飛行機", icon: "flight" });
       tabsEl.hidden = false;
       tabsEl.innerHTML = tabDefs.map((t) => `
         <button type="button" class="profile-tab-btn${t.id === "posts" ? " active" : ""}" data-tab="${t.id}">${t.icon ? `<span class="material-symbols-rounded ui-ic" aria-hidden="true">${t.icon}</span> ` : ""}${escapeHtml(t.label)}</button>
@@ -5421,6 +5524,7 @@
         btn.addEventListener("click", () => showTab(btn.dataset.tab));
       });
       if (!animeList.length) overlay.querySelector("#profile-tab-anime").hidden = true;
+      if (!aircraftList.length) overlay.querySelector("#profile-tab-aircraft").hidden = true;
 
       // ---- 各タブの中身
       const postIds = posts.map((p) => p.id);
@@ -5457,6 +5561,8 @@
           loadFollowList(overlay.querySelector("#profile-tab-following"), callsign, "following", () => activeTab !== "following");
         } else if (tab === "anime") {
           renderAnimeSidebar(overlay.querySelector("#profile-tab-anime"), animeList);
+        } else if (tab === "aircraft") {
+          renderAircraftSidebar(overlay.querySelector("#profile-tab-aircraft"), aircraftList);
         }
       };
 
@@ -7161,6 +7267,18 @@
             </div>
             <button type="button" class="btn btn-ghost btn-block" id="anime-editor-add">+ アニメを追加</button>
           </div>
+          <div class="field">
+            <label>好きな飛行機</label>
+            <div id="favorite-aircraft-editor" class="anime-editor">
+              ${(state.user.favoriteAircraftList && state.user.favoriteAircraftList.length ? state.user.favoriteAircraftList : [""]).map((title) => `
+                <div class="anime-editor-row">
+                  <input type="text" class="anime-editor-input" value="${escapeHtml(title)}" maxlength="100" placeholder="例: ボーイング747-400" />
+                  <button type="button" class="anime-editor-remove" aria-label="削除">✕</button>
+                </div>
+              `).join("")}
+            </div>
+            <button type="button" class="btn btn-ghost btn-block" id="aircraft-editor-add">+ 飛行機を追加</button>
+          </div>
           ${state.error ? `<div class="error-banner">${escapeHtml(state.error)}</div>` : ""}
           <div style="display:flex; gap:10px; margin-top: 6px;">
             <button type="submit" class="btn btn-primary" id="profile-save" style="flex:1">保存</button>
@@ -7214,10 +7332,39 @@
     });
     document.getElementById("anime-editor-add").addEventListener("click", () => addAnimeRow(true));
 
+    // 好きな飛行機の行を増減する。最大10件(サーバー側の上限と合わせる)。
+    const AIRCRAFT_MAX = 10;
+    const aircraftEditor = document.getElementById("favorite-aircraft-editor");
+    function addAircraftRow(focus) {
+      if (aircraftEditor.querySelectorAll(".anime-editor-row").length >= AIRCRAFT_MAX) return;
+      const row = document.createElement("div");
+      row.className = "anime-editor-row";
+      row.innerHTML = `
+        <input type="text" class="anime-editor-input" maxlength="100" placeholder="例: ボーイング747-400" />
+        <button type="button" class="anime-editor-remove" aria-label="削除">✕</button>
+      `;
+      aircraftEditor.appendChild(row);
+      if (focus) row.querySelector("input").focus();
+    }
+    aircraftEditor.addEventListener("click", (e) => {
+      const btn = e.target.closest(".anime-editor-remove");
+      if (!btn) return;
+      const rows = aircraftEditor.querySelectorAll(".anime-editor-row");
+      if (rows.length <= 1) {
+        btn.closest(".anime-editor-row").querySelector("input").value = "";
+      } else {
+        btn.closest(".anime-editor-row").remove();
+      }
+    });
+    document.getElementById("aircraft-editor-add").addEventListener("click", () => addAircraftRow(true));
+
     document.getElementById("profile-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const favoriteAnimeList = Array.from(animeEditor.querySelectorAll(".anime-editor-input"))
+        .map((input) => input.value.trim())
+        .filter(Boolean);
+      const favoriteAircraftList = Array.from(aircraftEditor.querySelectorAll(".anime-editor-input"))
         .map((input) => input.value.trim())
         .filter(Boolean);
       const saveBtn = document.getElementById("profile-save");
@@ -7229,6 +7376,7 @@
           homeBase: fd.get("homeBase"),
           bio: fd.get("bio"),
           favoriteAnimeList,
+          favoriteAircraftList,
           avatarFile: pendingAvatarFile,
         });
         overlay.remove();

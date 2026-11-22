@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   home_base     TEXT,
   bio           TEXT,
   favorite_anime TEXT,
+  favorite_aircraft TEXT,
   hue           INTEGER DEFAULT 200,
   avatar_path   TEXT,
   password_hash TEXT NOT NULL,
