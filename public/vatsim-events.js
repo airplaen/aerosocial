@@ -1,22 +1,15 @@
-// AeroSocial — VATSIM / VATJPN イベント連携
+// AeroSocial — VATSIM / VATJPN イベント連携 (フロント)
 // ---------------------------------------------------------------------
 // 既存のイベントモーダル (app.js の openEventsModal) に「VATSIM」と
 // 「VATJPN」タブを追加する独立スクリプト。app.js 本体は無改造。
-// データは VATSIM 公式の公開API (myVATSIM) からブラウザが直接取得する。
-//   GET https://my.vatsim.net/api/v2/events
-// VATJPNタブは、主催ディビジョン / 空港 (RJ**) / 名称から日本の
-// イベントを抽出して表示する。
-// 取得に失敗した場合は、公式イベントページへのリンクを表示する。
+// データは自サーバーの /api/vatsim/events から取得する (サーバー側が
+// VATSIM公式 Events API を15分ごとに自動取得・キャッシュしている)。
 (() => {
   "use strict";
 
-  const API_URL = "https://my.vatsim.net/api/v2/events";
-  const VATSIM_EVENTS_PAGE = "https://my.vatsim.net/events";
+  const API_BASE = "/api/vatsim/events";
+  const VATSIM_EVENTS_PAGE = "https://www.vatsim.net/events";
   const VATJPN_SITE = "https://www.vatjpn.org/";
-  const CACHE_KEY = "aerosocial-vatsim-events-v1";
-  const CACHE_TTL_MS = 10 * 60 * 1000;
-
-  let memCache = null; // { at: number, events: Array }
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -25,74 +18,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
-  }
-
-  function normalize(payload) {
-    const list = Array.isArray(payload)
-      ? payload
-      : payload?.data || payload?.events || [];
-    const now = Date.now();
-    return list
-      .map((ev) => {
-        const airports = (ev.airports || [])
-          .map((a) => (typeof a === "string" ? a : a?.icao || a?.code || ""))
-          .filter(Boolean);
-        const orgText = (ev.organisers || ev.organizers || [])
-          .map((o) =>
-            [o?.region, o?.division, o?.subdivision, o?.organisation, o?.organization]
-              .filter(Boolean)
-              .join(" ")
-          )
-          .join(" ");
-        const start = new Date(ev.start_time || ev.startTime || ev.starts_at || "");
-        const end = new Date(ev.end_time || ev.endTime || ev.ends_at || "");
-        return {
-          name: ev.name || ev.title || "イベント",
-          link: ev.link || ev.url || VATSIM_EVENTS_PAGE,
-          banner: ev.banner || ev.image || "",
-          airports,
-          orgText,
-          start,
-          end,
-        };
-      })
-      .filter((ev) => !Number.isNaN(ev.start.getTime()))
-      .filter((ev) => (Number.isNaN(ev.end.getTime()) ? ev.start.getTime() : ev.end.getTime()) >= now)
-      .sort((a, b) => a.start - b.start);
-  }
-
-  function isJapanEvent(ev) {
-    if (/vatjpn|japan/i.test(ev.orgText)) return true;
-    if (ev.airports.some((icao) => /^RJ[A-Z]{2}$/i.test(icao))) return true;
-    if (/vatjpn|japan|日本/i.test(ev.name)) return true;
-    return false;
-  }
-
-  async function fetchEvents() {
-    if (memCache && Date.now() - memCache.at < CACHE_TTL_MS) return memCache.events;
-    try {
-      const raw = sessionStorage.getItem(CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Date.now() - parsed.at < CACHE_TTL_MS && Array.isArray(parsed.events)) {
-          memCache = { at: parsed.at, events: parsed.events.map(revive) };
-          return memCache.events;
-        }
-      }
-    } catch (_) { /* cache is best-effort */ }
-
-    const res = await fetch(API_URL, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error(`VATSIM API error: ${res.status}`);
-    const events = normalize(await res.json());
-    memCache = { at: Date.now(), events };
-    try {
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: memCache.at, events }));
-    } catch (_) { /* ignore quota errors */ }
-    return events;
-  }
-
-  function revive(ev) {
-    return { ...ev, start: new Date(ev.start), end: new Date(ev.end) };
   }
 
   const fmtJst = new Intl.DateTimeFormat("ja-JP", {
@@ -110,17 +35,20 @@
   });
 
   function whenLabel(ev) {
-    const jst = fmtJst.format(ev.start);
-    const z = fmtZulu.format(ev.start);
-    if (!Number.isNaN(ev.end.getTime())) {
-      return `${jst} – ${fmtJst.format(ev.end)} JST（${z}Z〜）`;
+    const start = new Date(ev.startTime);
+    if (Number.isNaN(start.getTime())) return "";
+    const end = ev.endTime ? new Date(ev.endTime) : null;
+    const jst = fmtJst.format(start);
+    const z = fmtZulu.format(start);
+    if (end && !Number.isNaN(end.getTime())) {
+      return `${jst} – ${fmtJst.format(end)} JST（${z}Z〜）`;
     }
     return `${jst} JST（${z}Z）`;
   }
 
   function cardHtml(ev, mode) {
     const badge = mode === "vatjpn" ? "🗾 VATJPN" : "🌐 VATSIM";
-    const route = ev.airports.length ? ev.airports.join(" · ") : "オンライン開催";
+    const route = ev.airports?.length ? ev.airports.join(" · ") : "オンライン開催";
     const banner = ev.banner
       ? `<img class="vatsim-banner" src="${escapeHtml(ev.banner)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
       : "";
@@ -134,12 +62,12 @@
         <div class="event-card-title">${escapeHtml(ev.name)}</div>
         <div class="event-card-meta">
           <span>📍 ${escapeHtml(route)}</span>
-          ${ev.orgText ? `<span>🏢 ${escapeHtml(ev.orgText)}</span>` : ""}
+          ${ev.organisers ? `<span>🏢 ${escapeHtml(ev.organisers)}</span>` : ""}
         </div>
         <div class="event-card-bottom">
           <span class="event-card-creator">VATSIM公式イベント</span>
           <a class="btn btn-primary" style="padding:5px 12px; font-size:12px; text-decoration:none;"
-             href="${escapeHtml(ev.link)}" target="_blank" rel="noopener noreferrer">詳細を見る</a>
+             href="${escapeHtml(ev.link || VATSIM_EVENTS_PAGE)}" target="_blank" rel="noopener noreferrer">詳細を見る</a>
         </div>
       </div>
     `;
@@ -185,9 +113,10 @@
       setCreateVisible(false);
       listSlot.innerHTML = `<div class="spinner-row">VATSIMイベントを読み込み中...</div>`;
       try {
-        const all = await fetchEvents();
-        const events = mode === "vatjpn" ? all.filter(isJapanEvent) : all;
-        if (!events.length) {
+        const res = await fetch(`${API_BASE}?scope=${mode === "vatjpn" ? "vatjpn" : "all"}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { events } = await res.json();
+        if (!events?.length) {
           listSlot.innerHTML = `<div class="empty-state">${
             mode === "vatjpn"
               ? "現在予定されている VATJPN（日本）のイベントはありません。"
@@ -197,7 +126,7 @@
         }
         listSlot.innerHTML =
           events.map((ev) => cardHtml(ev, mode)).join("") +
-          `<div class="empty-state" style="border:none; padding:12px;">出典: <a href="${VATSIM_EVENTS_PAGE}" target="_blank" rel="noopener noreferrer">myVATSIM イベント一覧</a>${
+          `<div class="empty-state" style="border:none; padding:12px;">出典: <a href="${VATSIM_EVENTS_PAGE}" target="_blank" rel="noopener noreferrer">VATSIM 公式イベント一覧</a>${
             mode === "vatjpn"
               ? ` / <a href="${VATJPN_SITE}" target="_blank" rel="noopener noreferrer">VATJPN 公式サイト</a>`
               : ""
@@ -205,7 +134,7 @@
       } catch (err) {
         listSlot.innerHTML = `
           <div class="error-banner">VATSIMイベントを取得できませんでした。時間をおいて再度お試しください。</div>
-          <div class="empty-state" style="margin-top:10px;">公式ページで確認できます: <a href="${VATSIM_EVENTS_PAGE}" target="_blank" rel="noopener noreferrer">myVATSIM イベント一覧</a>${
+          <div class="empty-state" style="margin-top:10px;">公式ページで確認できます: <a href="${VATSIM_EVENTS_PAGE}" target="_blank" rel="noopener noreferrer">VATSIM 公式イベント一覧</a>${
             mode === "vatjpn"
               ? ` / <a href="${VATJPN_SITE}" target="_blank" rel="noopener noreferrer">VATJPN 公式サイト</a>`
               : ""
