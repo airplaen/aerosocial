@@ -70,6 +70,13 @@ function main() {
   } catch (err) {
     if (!/duplicate column/i.test(err.message)) throw err;
   }
+  // Same pattern for the profile header (banner) image column.
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN banner_path TEXT");
+    console.log("Added banner_path column to users.");
+  } catch (err) {
+    if (!/duplicate column/i.test(err.message)) throw err;
+  }
 
 
   // For databases created before the follow feature existed: schema.sql's

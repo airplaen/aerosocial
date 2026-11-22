@@ -300,3 +300,12 @@ img, video, iframe { max-width: 100%; }
 ::-webkit-scrollbar-thumb:active { background: linear-gradient(180deg, #4a7bf0, #8a5cf0); }
 ::-webkit-scrollbar-corner { background: transparent; }
 .sidebar::-webkit-scrollbar { width: 5px; }
+
+/* ---- Profile header (banner) image (2026-11-22) ---- */
+.profile-header-banner--image { background-size: cover; background-position: center; background-repeat: no-repeat; }
+.profile-banner-preview {
+  height: 84px; border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, hsl(220 65% 42%) 0%, hsl(265 65% 52%) 100%);
+}
+.profile-banner-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }

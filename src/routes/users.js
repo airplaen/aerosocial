@@ -37,6 +37,7 @@ function publicUser(row) {
     favoriteAircraftList: parseAnimeList(row.favorite_aircraft),
     hue: row.hue,
     avatarUrl: row.avatar_path ? `/uploads/${row.avatar_path}` : null,
+    bannerUrl: row.banner_path ? `/uploads/${row.banner_path}` : null,
     joined: row.created_at,
   };
 }
@@ -51,8 +52,8 @@ router.get("/me", requireAuth, async (req, res) => {
 // PATCH /api/users/me
 // Accepts either JSON or multipart/form-data (multipart is required to
 // include a new avatar image under the "avatar" field).
-// Fields: name?, homeBase?, bio?, favoriteAnimeList? / favoriteAircraftList? (JSON array string), hue?, currentPassword?, newPassword?, avatar? (file)
-router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
+// Fields: name?, homeBase?, bio?, favoriteAnimeList? / favoriteAircraftList? (JSON array string), hue?, currentPassword?, newPassword?, avatar? / banner? (files)
+router.patch("/me", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 }, { name: "banner", maxCount: 1 }]), async (req, res) => {
   try {
     const { name, homeBase, bio, favoriteAnimeList, favoriteAircraftList, hue, currentPassword, newPassword } = req.body;
 
@@ -132,9 +133,17 @@ router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
       params.push(h);
     }
 
-    if (req.file) {
+    const avatarFile = req.files?.avatar?.[0];
+    const bannerFile = req.files?.banner?.[0];
+
+    if (avatarFile) {
       fields.push(`avatar_path = $${idx++}`);
-      params.push(req.file.filename);
+      params.push(avatarFile.filename);
+    }
+
+    if (bannerFile) {
+      fields.push(`banner_path = $${idx++}`);
+      params.push(bannerFile.filename);
     }
 
     if (newPassword) {
@@ -158,9 +167,13 @@ router.patch("/me", requireAuth, upload.single("avatar"), async (req, res) => {
     params.push(req.user.id);
     await pool.query(`UPDATE users SET ${fields.join(", ")} WHERE id = $${idx}`, params);
 
-    // Clean up the old avatar file once the new one is safely saved.
-    if (req.file && user.avatar_path) {
+    // Clean up the old avatar/banner files once the new ones are safely saved.
+    if (avatarFile && user.avatar_path) {
       const oldPath = `${process.env.UPLOAD_DIR || "./uploads"}/${user.avatar_path}`;
+      fs.unlink(oldPath, () => {});
+    }
+    if (bannerFile && user.banner_path) {
+      const oldPath = `${process.env.UPLOAD_DIR || "./uploads"}/${user.banner_path}`;
       fs.unlink(oldPath, () => {});
     }
 
