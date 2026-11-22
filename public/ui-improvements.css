@@ -271,3 +271,9 @@ img, video, iframe { max-width: 100%; }
   .post { padding: 14px; }
   .flight-route-row { font-size: 20px; }
 }
+
+/* ---- UI icons: Material Symbols replacing emoji icons (2026-11-22) ---- */
+.material-symbols-rounded.ui-ic { font-size: 1.12em; vertical-align: -0.16em; }
+.material-symbols-rounded.ui-ic-fill { font-variation-settings: "FILL" 1; }
+.dm-avatar .material-symbols-rounded.ui-ic { font-size: 20px; vertical-align: middle; }
+.news-item-thumb-fallback .material-symbols-rounded.ui-ic { font-size: 22px; vertical-align: middle; }

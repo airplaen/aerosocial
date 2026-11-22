@@ -407,9 +407,9 @@
     const subtitle = [f.originName, f.destName].filter(Boolean).map(escapeHtml).join("  →  ");
 
     const badges = [];
-    if (f.callsign) badges.push(`<span class="flight-badge">📻 ${escapeHtml(f.callsign)}</span>`);
-    if (f.aircraftName || f.aircraftIcao) badges.push(`<span class="flight-badge">🛩️ ${escapeHtml(f.aircraftName || f.aircraftIcao)}</span>`);
-    if (typeof f.route === "string" && f.route) badges.push(`<span class="flight-badge" title="${escapeHtml(f.route)}">🗺️ ${escapeHtml(f.route)}</span>`);
+    if (f.callsign) badges.push(`<span class="flight-badge"><span class="material-symbols-rounded ui-ic" aria-hidden="true">radio</span> ${escapeHtml(f.callsign)}</span>`);
+    if (f.aircraftName || f.aircraftIcao) badges.push(`<span class="flight-badge"><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> ${escapeHtml(f.aircraftName || f.aircraftIcao)}</span>`);
+    if (typeof f.route === "string" && f.route) badges.push(`<span class="flight-badge" title="${escapeHtml(f.route)}"><span class="material-symbols-rounded ui-ic" aria-hidden="true">route</span> ${escapeHtml(f.route)}</span>`);
 
     const stats = [];
     if (f.durMin != null) stats.push(`<div class="stat"><b>${Math.round(f.durMin)}分</b>飛行時間</div>`);
@@ -1603,13 +1603,13 @@
     } else if (eew.detectionOnly) {
       el.classList.remove("eew-popup-cancelled");
       bodyHtml = `
-        <div class="eew-popup-title">⚠️ 緊急地震速報を検知しました</div>
+        <div class="eew-popup-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> 緊急地震速報を検知しました</div>
         <div class="eew-popup-body">詳細情報を確認中です…</div>
       `;
     } else {
       el.classList.remove("eew-popup-cancelled");
       bodyHtml = `
-        <div class="eew-popup-title">⚠️ 緊急地震速報（予報）</div>
+        <div class="eew-popup-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> 緊急地震速報（予報）</div>
         <div class="eew-popup-body">
           震源: ${escapeHtml(eew.hypocenterName || "不明")}<br />
           予想最大震度: <b>${scaleLabel(eew.maxScale)}</b>
@@ -1673,7 +1673,7 @@
     el.innerHTML = `
       <div class="warning-bar-inner">
         ${data.isTest ? `<div class="quake-test-badge">テスト配信</div>` : ""}
-        <div class="warning-bar-title">⚠️ ${escapeHtml(data.areaName || "気象警報・注意報")}</div>
+        <div class="warning-bar-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> ${escapeHtml(data.areaName || "気象警報・注意報")}</div>
         <div class="warning-bar-body">${escapeHtml(data.headline || "")}</div>
       </div>
       <button type="button" class="warning-bar-close" aria-label="閉じる">✕</button>
@@ -1713,7 +1713,7 @@
 
     el.innerHTML = `
       <div class="announcement-bar-inner">
-        <div class="announcement-bar-title">📣 運営からのお知らせ</div>
+        <div class="announcement-bar-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">campaign</span> 運営からのお知らせ</div>
         <div class="announcement-bar-body">${escapeHtml(data.message || "")}</div>
       </div>
       <button type="button" class="announcement-bar-close" aria-label="閉じる">✕</button>
@@ -2024,7 +2024,7 @@
     return `
       <div class="quake-eew-alert">
         ${eew.isTest ? `<div class="quake-test-badge">テスト表示</div>` : ""}
-        <div class="quake-eew-title">⚠️ 緊急地震速報（予報）</div>
+        <div class="quake-eew-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> 緊急地震速報（予報）</div>
         <div class="quake-eew-body">
           震源: ${escapeHtml(eew.hypocenterName || "不明")}<br />
           予想最大震度: <b>${scaleLabel(eew.maxScale)}</b>
@@ -2100,7 +2100,7 @@
     slot.innerHTML = `
       <div class="quake-panel">
         <div class="quake-panel-head">
-          <div class="quake-panel-title">🌐 地震情報</div>
+          <div class="quake-panel-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">public</span> 地震情報</div>
           <div class="quake-ws-indicator">
             <span class="quake-ws-dot ${state.quakeWsConnected ? "live" : ""}"></span>
             ${state.quakeTestMode ? "テストモード受信中" : (state.quakeWsConnected ? "受信中" : "接続中...")}
@@ -2157,14 +2157,14 @@
     const list = state.sidebarLeaderboard || [];
     slot.innerHTML = `
       <div class="events-sidebar-panel">
-        <div class="events-sidebar-title"><span>🏆</span> 今月のランキング</div>
+        <div class="events-sidebar-title"><span><span class="material-symbols-rounded ui-ic" aria-hidden="true">emoji_events</span></span> 今月のランキング</div>
         ${!list.length
           ? `<div class="quake-empty">今月のフライト記録はまだありません</div>`
           : `<div class="events-sidebar-list">
               ${list.map((entry, i) => `
                 <button type="button" class="events-sidebar-item" data-callsign="${escapeHtml(entry.user.callsign)}">
                   <div class="sidebar-leaderboard-lead">
-                    <span class="sidebar-leaderboard-rank">${i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}</span>
+                    <span class="sidebar-leaderboard-rank">${i + 1}</span>
                     ${avatarHtml(entry.user, 28)}
                   </div>
                   <div class="events-sidebar-item-body">
@@ -2215,7 +2215,7 @@
         ${day.icon ? `<img class="weather-day-icon" src="${weatherIconUrl(day.icon)}" alt="${escapeHtml(day.weather)}" loading="lazy" />` : ""}
         <div class="weather-day-temp"><b>${day.tempMax}°</b><span class="weather-day-temp-min">/ ${day.tempMin}°</span></div>
         <div class="weather-day-desc">${escapeHtml(day.weather)}</div>
-        ${day.pop != null ? `<div class="weather-day-pop">☔ ${day.pop}%</div>` : ""}
+        ${day.pop != null ? `<div class="weather-day-pop"><span class="material-symbols-rounded ui-ic" aria-hidden="true">umbrella</span> ${day.pop}%</div>` : ""}
       </div>
     `;
   }
@@ -2224,7 +2224,7 @@
     const w = state.weather;
     return `
       <div class="weather-section">
-        <div class="weather-section-title">🌤️ 天気予報</div>
+        <div class="weather-section-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">partly_cloudy_day</span> 天気予報</div>
         <div class="weather-search" id="weather-search">
           <span class="material-symbols-rounded feed-search-icon" aria-hidden="true">search</span>
           <input type="text" id="weather-search-input" placeholder="地域名で検索（例: 名古屋）" autocomplete="off" value="${escapeHtml(w.query)}" />
@@ -2243,7 +2243,7 @@
         ` : ""}
         ${w.data && w.location ? `
           <div class="weather-result">
-            <div class="weather-result-location">📍 ${escapeHtml(w.location.displayName)}${w.location.country ? `（${escapeHtml(w.location.country)}）` : ""}</div>
+            <div class="weather-result-location"><span class="material-symbols-rounded ui-ic" aria-hidden="true">location_on</span> ${escapeHtml(w.location.displayName)}${w.location.country ? `（${escapeHtml(w.location.country)}）` : ""}</div>
             <div class="weather-day-grid">
               ${weatherDayCardHtml("今日", w.data.today)}
               ${weatherDayCardHtml("明日", w.data.tomorrow)}
@@ -2368,7 +2368,7 @@
         ${h.icon ? `<img class="weather-hour-icon" src="${weatherIconUrl(h.icon)}" alt="${escapeHtml(h.weather)}" loading="lazy" />` : ""}
         <div class="weather-hour-desc">${escapeHtml(h.weather)}</div>
         <div class="weather-hour-temp">${h.temp}°</div>
-        <div class="weather-hour-pop">☔${h.pop}%</div>
+        <div class="weather-hour-pop"><span class="material-symbols-rounded ui-ic" aria-hidden="true">umbrella</span>${h.pop}%</div>
       </div>
     `;
   }
@@ -2387,7 +2387,7 @@
 
     return `
       <div class="weather-detail">
-        <div class="weather-detail-tag">🌤️ 天気予報詳細</div>
+        <div class="weather-detail-tag"><span class="material-symbols-rounded ui-ic" aria-hidden="true">partly_cloudy_day</span> 天気予報詳細</div>
         <div class="weather-detail-location"><b>${escapeHtml(w.location.displayName)}</b>${city.country ? `（${escapeHtml(city.country)}）` : ""}</div>
         <div class="weather-detail-current">
           ${c.icon ? `<img class="weather-detail-current-icon" src="${weatherIconUrl(c.icon)}" alt="${escapeHtml(c.weather || "")}" />` : ""}
@@ -2544,7 +2544,7 @@
 
     return `
       <div class="weather-section warning-alert-section">
-        <div class="weather-section-title">⚠️ 気象警報・注意報</div>
+        <div class="weather-section-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> 気象警報・注意報</div>
         <select class="warning-alert-select" id="warning-alert-select">
           <option value="">地域を選択...</option>
           ${options}
@@ -2675,7 +2675,7 @@
                   <button class="icon-btn" id="pick-poll-btn" title="投票を追加"><span class="material-symbols-rounded" aria-hidden="true">bar_chart</span></button>
                 </div>
                 <div style="display:flex; gap:8px;">
-                  <button type="button" class="btn btn-ghost" id="simbrief-import-btn">📋 SimBrief</button>
+                  <button type="button" class="btn btn-ghost" id="simbrief-import-btn"><span class="material-symbols-rounded ui-ic" aria-hidden="true">description</span> SimBrief</button>
                   <button class="btn btn-primary" id="composer-submit">投稿</button>
                 </div>
               </div>
@@ -2710,7 +2710,7 @@
              メニューの奥に隠さず、どの画面からでも一発で前面に呼び出せる
              ようにするためのショートカット。 -->
         <button type="button" class="memo-fab" id="memo-fab" title="メモを開く" aria-label="メモを開く">
-          <span aria-hidden="true">📝</span>
+          <span class="material-symbols-rounded" aria-hidden="true">edit_note</span>
         </button>
       </div>
     `;
@@ -2927,7 +2927,7 @@
   // desktop sidebar (renderPopularFlights / renderQuakePanel), just handed
   // this sheet's own content element as the render target instead.
   function openMobilePanel(kind) {
-    const titles = { flights: "🏆 人気のフライト", quake: "🌐 地震情報" };
+    const titles = { flights: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>emoji_events</span> 人気のフライト", quake: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>public</span> 地震情報" };
     const overlay = document.createElement("div");
     overlay.className = "modal-backdrop mobile-panel-backdrop";
     overlay.innerHTML = `
@@ -3141,10 +3141,10 @@
             <span class="news-hub-back-arrow">←</span>
           </button>
           <div class="news-hub-masthead-text">
-            <div class="news-hub-masthead-title"><span>📝</span> メモ（ニーボード）</div>
+            <div class="news-hub-masthead-title"><span><span class="material-symbols-rounded ui-ic" aria-hidden="true">edit_note</span></span> メモ（ニーボード）</div>
             <div class="news-hub-masthead-sub">VATSIMのフライト中に。手書き（Apple Pencil対応）も使えます</div>
           </div>
-          <button type="button" class="btn btn-ghost memo-list-toggle" id="memo-list-toggle" title="メモ一覧">☰ 一覧</button>
+          <button type="button" class="btn btn-ghost memo-list-toggle" id="memo-list-toggle" title="メモ一覧"><span class="material-symbols-rounded ui-ic" aria-hidden="true">list</span> 一覧</button>
         </div>
         <div class="memo-body" id="memo-body">
           <div class="memo-sidebar" id="memo-sidebar">
@@ -3214,7 +3214,7 @@
       }
       listEl.innerHTML = memos.map((m) => `
         <button type="button" class="memo-list-item${m.id === currentId ? " active" : ""}" data-id="${m.id}">
-          <div class="memo-list-item-title">${escapeHtml(m.title)}${m.hasDrawing ? " ✏️" : ""}</div>
+          <div class="memo-list-item-title">${escapeHtml(m.title)}${m.hasDrawing ? ' <span class="material-symbols-rounded ui-ic" aria-hidden="true">draw</span>' : ""}</div>
           <div class="memo-list-item-preview">${m.textPreview ? escapeHtml(m.textPreview) : "（本文なし）"}</div>
           <div class="memo-list-item-time">${fmtTime(m.updatedAt)}</div>
         </button>
@@ -3252,14 +3252,14 @@
       editorEl.innerHTML = `
         <div class="memo-editor-toolbar">
           <input id="memo-title-input" class="memo-title-input" maxlength="${MEMO_TITLE_MAX}" placeholder="タイトル（未入力は「無題のメモ」）" value="${escapeHtml(memo.title || "")}" />
-          <button type="button" class="btn btn-ghost" id="memo-simbrief-btn">📋 SimBriefから取得</button>
-          <button type="button" class="btn btn-ghost" id="memo-pip-btn" title="別ウィンドウで常時最前面に表示（Chrome/Edge）">🪟 常時表示</button>
+          <button type="button" class="btn btn-ghost" id="memo-simbrief-btn"><span class="material-symbols-rounded ui-ic" aria-hidden="true">description</span> SimBriefから取得</button>
+          <button type="button" class="btn btn-ghost" id="memo-pip-btn" title="別ウィンドウで常時最前面に表示（Chrome/Edge）"><span class="material-symbols-rounded ui-ic" aria-hidden="true">picture_in_picture_alt</span> 常時表示</button>
         </div>
         <div class="memo-canvas-toolbar">
           <input type="color" id="memo-pen-color" value="${drawTool.color}" title="ペンの色" />
           <input type="range" id="memo-pen-size" min="1" max="16" value="${drawTool.size}" title="太さ" />
-          <button type="button" class="btn btn-ghost memo-tool-btn" id="memo-eraser-btn" title="消しゴム">🩹 消しゴム</button>
-          <button type="button" class="btn btn-ghost" id="memo-canvas-clear-btn" title="手書きを全消去">🗑️ 全消去</button>
+          <button type="button" class="btn btn-ghost memo-tool-btn" id="memo-eraser-btn" title="消しゴム"><span class="material-symbols-rounded ui-ic" aria-hidden="true">ink_eraser</span> 消しゴム</button>
+          <button type="button" class="btn btn-ghost" id="memo-canvas-clear-btn" title="手書きを全消去"><span class="material-symbols-rounded ui-ic" aria-hidden="true">delete</span> 全消去</button>
         </div>
         <div class="memo-canvas-wrap">
           <canvas id="memo-canvas" class="memo-canvas"></canvas>
@@ -3422,7 +3422,7 @@
         toast(err.message);
       } finally {
         btn.disabled = false;
-        btn.textContent = "📋 SimBriefから取得";
+        btn.innerHTML = '<span class="material-symbols-rounded ui-ic" aria-hidden="true">description</span> SimBriefから取得';
       }
     }
 
@@ -3537,8 +3537,8 @@
         <div class="memo-pip-toolbar">
           <input type="color" id="pip-pen-color" value="#1a2233" title="ペンの色" />
           <input type="range" id="pip-pen-size" min="1" max="16" value="3" title="太さ" />
-          <button type="button" class="btn btn-ghost memo-tool-btn" id="pip-eraser-btn" title="消しゴム">🩹</button>
-          <button type="button" class="btn btn-ghost" id="pip-clear-btn" title="全消去">🗑️</button>
+          <button type="button" class="btn btn-ghost memo-tool-btn" id="pip-eraser-btn" title="消しゴム"><span class="material-symbols-rounded ui-ic" aria-hidden="true">ink_eraser</span></button>
+          <button type="button" class="btn btn-ghost" id="pip-clear-btn" title="全消去"><span class="material-symbols-rounded ui-ic" aria-hidden="true">delete</span></button>
         </div>
         <div class="memo-pip-canvas-wrap"><canvas id="pip-canvas" class="memo-canvas"></canvas></div>
         <textarea id="pip-text" class="memo-text-input memo-pip-text" maxlength="${MEMO_TEXT_MAX}" placeholder="テキストメモ">${escapeHtml(memo.textContent || "")}</textarea>
@@ -3950,7 +3950,7 @@
     if (!flightCount) { slot.innerHTML = ""; return; }
     slot.innerHTML = `
       <div class="feed-stats">
-        <span>✈️</span> フィード内のフライト投稿 <b>${flightCount}</b> 件
+        <span><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span></span> フィード内のフライト投稿 <b>${flightCount}</b> 件
       </div>
     `;
   }
@@ -3972,7 +3972,7 @@
     }
     slot.innerHTML = `
       <div class="popular-flights">
-        <div class="popular-flights-title">🏆 人気のフライト</div>
+        <div class="popular-flights-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">emoji_events</span> 人気のフライト</div>
         <div class="popular-flights-list">
           ${list.map((p) => `
             <button type="button" class="popular-flight-item" data-post-id="${p.id}">
@@ -3982,7 +3982,7 @@
               <div class="popular-flight-meta">
                 ${avatarHtml({ name: p.authorName, hue: p.authorHue, avatarUrl: p.authorAvatarUrl }, 20)}
                 <span>@${escapeHtml(p.authorCallsign)}</span>
-                <span class="popular-flight-likes">❤️ ${p.likeCount}</span>
+                <span class="popular-flight-likes"><span class="material-symbols-rounded ui-ic" aria-hidden="true">favorite</span> ${p.likeCount}</span>
               </div>
             </button>
           `).join("")}
@@ -4009,13 +4009,13 @@
       ? (append || targetEl ? `<div class="quake-empty">まだニュースはありません</div>` : "")
       : `
         <div class="news-panel">
-          <div class="news-panel-title"><span>🗞️</span> 日本のニュース</div>
+          <div class="news-panel-title"><span><span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span></span> 日本のニュース</div>
           <div class="news-panel-list">
             ${list.slice(0, 20).map((n) => `
               <button type="button" class="news-item${n.isBreaking ? " news-item-breaking" : ""}" data-news-id="${escapeHtml(n.id)}">
                 ${n.imageUrl
                   ? `<img class="news-item-thumb" src="${escapeHtml(n.imageUrl)}" loading="lazy" alt="" data-fallback-hue="${hueFromString(n.source || n.title)}" />`
-                  : `<div class="news-item-thumb news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}">🗞️</div>`}
+                  : `<div class="news-item-thumb news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}"><span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span></div>`}
                 <div class="news-item-body">
                   ${n.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
                   <div class="news-item-title">${escapeHtml(n.title)}</div>
@@ -4058,7 +4058,7 @@
     const fallback = document.createElement("div");
     fallback.className = `${baseClass || "news-item-thumb"} news-item-thumb-fallback`;
     fallback.style.setProperty("--news-hue", hue);
-    fallback.textContent = "🗞️";
+    fallback.innerHTML = '<span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span>';
     imgEl.replaceWith(fallback);
   }
 
@@ -4095,7 +4095,7 @@
     if (n.imageUrl) {
       return `<img class="${imgClass}" src="${escapeHtml(n.imageUrl)}" loading="lazy" alt="" data-fallback-hue="${hueFromString(n.source || n.title)}" data-fallback-class="${imgClass}" />`;
     }
-    return `<div class="${imgClass} news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}">🗞️</div>`;
+    return `<div class="${imgClass} news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}"><span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span></div>`;
   }
 
   function renderNewsHubHeroHtml(n) {
@@ -4268,7 +4268,7 @@
             <span class="news-hub-back-arrow">←</span>
           </button>
           <div class="news-hub-masthead-text">
-            <div class="news-hub-masthead-title"><span>🗞️</span> AeroSocial ニュース</div>
+            <div class="news-hub-masthead-title"><span><span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span></span> AeroSocial ニュース</div>
             <div class="news-hub-masthead-sub">日本の最新ニュースをお届け</div>
           </div>
         </div>
@@ -4315,7 +4315,7 @@
   function messageBubbleHtml(m) {
     return `
       <div class="dm-message" data-id="${escapeHtml(m.id)}">
-        <div class="dm-avatar" aria-hidden="true">📣</div>
+        <div class="dm-avatar" aria-hidden="true"><span class="material-symbols-rounded ui-ic" aria-hidden="true">campaign</span></div>
         <div class="dm-bubble-col">
           <div class="dm-bubble-meta"><span class="dm-sender">運営${m.authorCallsign ? `（${escapeHtml(m.authorCallsign)}）` : ""}</span></div>
           <div class="dm-bubble">${escapeHtml(m.message)}</div>
@@ -4352,7 +4352,7 @@
     overlay.innerHTML = `
       <div class="modal dm-modal">
         <button class="modal-close" id="messages-close">✕</button>
-        <h2>📣 運営からのメッセージ</h2>
+        <h2><span class="material-symbols-rounded ui-ic" aria-hidden="true">campaign</span> 運営からのメッセージ</h2>
         <div class="dm-body" id="messages-body"></div>
       </div>
     `;
@@ -4429,7 +4429,7 @@
 
     el.innerHTML = `
       <div class="news-flash-inner" id="news-flash-body">
-        <div class="news-flash-title">🚨 速報</div>
+        <div class="news-flash-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">bolt</span> 速報</div>
         <div class="news-flash-headline">${escapeHtml(item.title)}</div>
         <div class="news-flash-source">${escapeHtml(item.source || "")}</div>
       </div>
@@ -4528,7 +4528,7 @@
             ${avatarHtml({ name: post.authorName, hue: post.authorHue, avatarUrl: post.authorAvatarUrl }, 38)}
             <div>
               <div class="name">${escapeHtml(post.authorName)} <span style="color:var(--text-dim);font-weight:400">@${escapeHtml(post.authorCallsign)}</span></div>
-              <div class="meta">${fmtTime(post.createdAt)}${post.authorFlightCount ? ` · ✈️ ${post.authorFlightCount}フライト` : ""}</div>
+              <div class="meta">${fmtTime(post.createdAt)}${post.authorFlightCount ? ` · <span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> ${post.authorFlightCount}フライト` : ""}</div>
             </div>
           </div>
           ${mine ? `<button class="delete-btn" data-action="delete">削除</button>` : ""}
@@ -4550,10 +4550,10 @@
 
         <div class="post-actions">
           <button class="action-btn ${post.likedByMe ? "liked" : ""}" data-action="like">
-            ${post.likedByMe ? "❤️" : "🤍"} ${post.likeCount}
+            ${post.likedByMe ? '<span class="material-symbols-rounded ui-ic ui-ic-fill" aria-hidden="true">favorite</span>' : '<span class="material-symbols-rounded ui-ic" aria-hidden="true">favorite</span>'} ${post.likeCount}
           </button>
-          <button class="action-btn" data-action="toggle-comments">💬 ${post.commentCount}</button>
-          <button class="action-btn" data-action="share">🔗 共有</button>
+          <button class="action-btn" data-action="toggle-comments"><span class="material-symbols-rounded ui-ic" aria-hidden="true">mode_comment</span> ${post.commentCount}</button>
+          <button class="action-btn" data-action="share"><span class="material-symbols-rounded ui-ic" aria-hidden="true">share</span> 共有</button>
         </div>
 
         ${isOpen ? `
@@ -5179,10 +5179,9 @@
   };
 
   function leaderboardRowHtml(entry, fmt, isMe) {
-    const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
-    return `
+        return `
       <div class="leaderboard-row${isMe ? " is-me" : ""}" data-callsign="${escapeHtml(entry.user.callsign)}">
-        <div class="leaderboard-rank">${medal || `#${entry.rank}`}</div>
+        <div class="leaderboard-rank">${entry.rank}</div>
         ${avatarHtml(entry.user, 32)}
         <div class="leaderboard-name">
           <div class="leaderboard-display-name">${escapeHtml(entry.user.name)}</div>
@@ -5199,7 +5198,7 @@
     overlay.innerHTML = `
       <div class="modal profile-modal">
         <button class="modal-close" id="leaderboard-close">✕</button>
-        <h2 style="font-size:16px;">🏆 ランキング</h2>
+        <h2 style="font-size:16px;"><span class="material-symbols-rounded ui-ic" aria-hidden="true">emoji_events</span> ランキング</h2>
         <div class="admin-section-title-row" style="margin-top:0;">
           <div class="admin-toggle-group" id="leaderboard-period-toggle">
             <button type="button" data-period="month" class="active">今月</button>
@@ -5408,12 +5407,12 @@
       const tabsEl = overlay.querySelector("#profile-tabs");
       const tabDefs = [
         { id: "posts", label: "投稿" },
-        { id: "logbook", label: "📊 ログブック" },
-        { id: "achievements", label: "🏆 実績" },
+        { id: "logbook", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>bar_chart</span> ログブック" },
+        { id: "achievements", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>emoji_events</span> 実績" },
         { id: "followers", label: `フォロワー ${followState.followerCount}` },
         { id: "following", label: `フォロー中 ${followingCount}` },
       ];
-      if (animeList.length) tabDefs.push({ id: "anime", label: "🎬 好きなアニメ" });
+      if (animeList.length) tabDefs.push({ id: "anime", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>movie</span> 好きなアニメ" });
       tabsEl.hidden = false;
       tabsEl.innerHTML = tabDefs.map((t) => `
         <button type="button" class="profile-tab-btn${t.id === "posts" ? " active" : ""}" data-tab="${t.id}">${escapeHtml(t.label)}</button>
@@ -5500,8 +5499,8 @@
 
     return `
       <div class="flight-detail">
-        <div class="flight-detail-tag">🧾 フライトプラン</div>
-        <div class="flight-detail-route"><b>${originIcao}</b><span class="flight-arrow">✈</span><b>${destIcao}</b></div>
+        <div class="flight-detail-tag"><span class="material-symbols-rounded ui-ic" aria-hidden="true">description</span> フライトプラン</div>
+        <div class="flight-detail-route"><b>${originIcao}</b><span class="flight-arrow"><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span></span><b>${destIcao}</b></div>
         ${subtitle ? `<div class="flight-subtitle">${subtitle}</div>` : ""}
         ${hasMap ? `<div class="flight-detail-map" id="flight-detail-map"></div>` : ""}
         ${typeof f.route === "string" && f.route ? `<div class="flight-detail-route-box">${escapeHtml(f.route)}</div>` : ""}
@@ -5515,7 +5514,7 @@
             `).join("")}
           </div>
         ` : ""}
-        <button type="button" class="btn btn-primary btn-block" id="flight-detail-fullscreen-btn" style="margin-top:16px;">📋 詳細を表示</button>
+        <button type="button" class="btn btn-primary btn-block" id="flight-detail-fullscreen-btn" style="margin-top:16px;"><span class="material-symbols-rounded ui-ic" aria-hidden="true">open_in_full</span> 詳細を表示</button>
       </div>
     `;
   }
@@ -5801,7 +5800,7 @@
             <div class="fs-section">
               <div class="fs-section-title">Route</div>
               <div class="fs-route-box">${escapeHtml(f.route)}</div>
-              <button type="button" class="btn btn-ghost fs-copy-btn" id="fs-copy-btn">📋 ルートをコピー</button>
+              <button type="button" class="btn btn-ghost fs-copy-btn" id="fs-copy-btn"><span class="material-symbols-rounded ui-ic" aria-hidden="true">content_copy</span> ルートをコピー</button>
             </div>
           ` : ""}
 
@@ -6030,7 +6029,7 @@
   // its detail (participant list) in a second, stacked popup — the same
   // "second modal on top" pattern used elsewhere in this file.
   function eventTypeLabel(eventType) {
-    return eventType === "flight" ? "✈️ フライト" : "🎉 イベント";
+    return eventType === "flight" ? "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>flight</span> フライト" : "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>celebration</span> イベント";
   }
 
   function eventWhenWhereLine(ev) {
@@ -6055,13 +6054,13 @@
         </div>
         <div class="event-card-title">${escapeHtml(ev.title)}</div>
         <div class="event-card-meta">
-          <span>📍 ${escapeHtml(eventWhenWhereLine(ev))}</span>
-          <span>👥 ${eventCapacityLabel(ev)}</span>
+          <span><span class="material-symbols-rounded ui-ic" aria-hidden="true">location_on</span> ${escapeHtml(eventWhenWhereLine(ev))}</span>
+          <span><span class="material-symbols-rounded ui-ic" aria-hidden="true">group</span> ${eventCapacityLabel(ev)}</span>
         </div>
         <div class="event-card-bottom">
           <span class="event-card-creator">${avatarHtml({ name: ev.creatorName, callsign: ev.creatorCallsign, hue: ev.creatorHue, avatarUrl: ev.creatorAvatarUrl }, 20)} ${escapeHtml(ev.creatorCallsign)}</span>
           <button type="button" class="btn ${ev.isJoined ? "btn-ghost" : "btn-primary"} event-join-btn" data-event-id="${ev.id}" data-joined="${ev.isJoined ? "1" : "0"}" style="padding:5px 12px; font-size:12px;" ${full ? "disabled" : ""}>
-            ${ev.isJoined ? "参加中 ✓" : (full ? "満員" : "参加する")}
+            ${ev.isJoined ? "参加中 <span class='material-symbols-rounded ui-ic' aria-hidden='true'>check</span>" : (full ? "満員" : "参加する")}
           </button>
         </div>
       </div>
@@ -6083,7 +6082,7 @@
     overlay.innerHTML = `
       <div class="modal events-modal">
         <button class="modal-close" id="events-close">✕</button>
-        <h2>📅 イベント</h2>
+        <h2><span class="material-symbols-rounded ui-ic" aria-hidden="true">event</span> イベント</h2>
         <div class="tabs">
           <button type="button" data-tab="upcoming" class="active">開催予定</button>
           <button type="button" data-tab="past">過去のイベント</button>
@@ -6179,11 +6178,11 @@
             <div style="display:flex; gap:16px;">
               <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
                 <input type="radio" name="event-type" value="general" ${createState.eventType === "general" ? "checked" : ""} style="width:auto;" />
-                🎉 一般イベント（オフ会・配信など）
+                <span class="material-symbols-rounded ui-ic" aria-hidden="true">celebration</span> 一般イベント（オフ会・配信など）
               </label>
               <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
                 <input type="radio" name="event-type" value="flight" ${createState.eventType === "flight" ? "checked" : ""} style="width:auto;" />
-                ✈️ 集合フライト
+                <span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> 集合フライト
               </label>
             </div>
           </div>
@@ -6341,9 +6340,9 @@
           <span class="event-type-badge">${eventTypeLabel(ev.eventType)}</span>
           <h3 style="margin:10px 0 4px;">${escapeHtml(ev.title)}</h3>
           <div style="color:var(--text-dim); font-size:13px; margin-bottom:10px;">
-            🕒 ${fmtEventDateTime(ev.startsAt)}${ev.endsAt ? ` 〜 ${fmtEventDateTime(ev.endsAt)}` : ""}<br />
-            📍 ${escapeHtml(eventWhenWhereLine(ev))}<br />
-            👥 ${eventCapacityLabel(ev)}
+            <span class="material-symbols-rounded ui-ic" aria-hidden="true">schedule</span> ${fmtEventDateTime(ev.startsAt)}${ev.endsAt ? ` 〜 ${fmtEventDateTime(ev.endsAt)}` : ""}<br />
+            <span class="material-symbols-rounded ui-ic" aria-hidden="true">location_on</span> ${escapeHtml(eventWhenWhereLine(ev))}<br />
+            <span class="material-symbols-rounded ui-ic" aria-hidden="true">group</span> ${eventCapacityLabel(ev)}
           </div>
           ${ev.description ? `<p style="white-space:pre-wrap; margin-bottom:14px;">${linkify(escapeHtml(ev.description))}</p>` : ""}
           <div style="display:flex; gap:8px; margin-bottom:14px;">
@@ -6436,7 +6435,7 @@
     overlay.innerHTML = `
       <div class="modal admin-modal">
         <button class="modal-close" id="admin-close">✕</button>
-        <h2>🛡️ 管理者パネル</h2>
+        <h2><span class="material-symbols-rounded ui-ic" aria-hidden="true">admin_panel_settings</span> 管理者パネル</h2>
         <div class="tabs">
           <button type="button" data-tab="stats" class="active">統計</button>
           <button type="button" data-tab="posts">投稿</button>
@@ -6699,7 +6698,7 @@
               <span class="admin-badge">${p.type === "flight" ? "フライト" : "テキスト"}</span>
             </div>
             <div class="admin-list-sub">${p.text ? escapeHtml(p.text.slice(0, 80)) : "<em>(本文なし)</em>"}</div>
-            <div class="admin-list-meta">❤️ ${p.likeCount} ・ 💬 ${p.commentCount} ・ ${fmtTime(p.createdAt)}</div>
+            <div class="admin-list-meta"><span class="material-symbols-rounded ui-ic" aria-hidden="true">favorite</span> ${p.likeCount} ・ <span class="material-symbols-rounded ui-ic" aria-hidden="true">mode_comment</span> ${p.commentCount} ・ ${fmtTime(p.createdAt)}</div>
           </div>
           <button type="button" class="btn btn-danger admin-delete-post-btn" data-id="${p.id}" style="padding:6px 12px; font-size:12px;">削除</button>
         </div>
