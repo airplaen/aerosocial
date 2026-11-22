@@ -47,7 +47,7 @@
   }
 
   function cardHtml(ev, mode) {
-    const badge = mode === "vatjpn" ? "🗾 VATJPN" : "🌐 VATSIM";
+    const badge = mode === "vatjpn" ? "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>flag</span> VATJPN" : "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>public</span> VATSIM";
     const route = ev.airports?.length ? ev.airports.join(" · ") : "オンライン開催";
     const banner = ev.banner
       ? `<img class="vatsim-banner" src="${escapeHtml(ev.banner)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
@@ -61,8 +61,8 @@
         </div>
         <div class="event-card-title">${escapeHtml(ev.name)}</div>
         <div class="event-card-meta">
-          <span>📍 ${escapeHtml(route)}</span>
-          ${ev.organisers ? `<span>🏢 ${escapeHtml(ev.organisers)}</span>` : ""}
+          <span><span class="material-symbols-rounded ui-ic" aria-hidden="true">location_on</span> ${escapeHtml(route)}</span>
+          ${ev.organisers ? `<span><span class="material-symbols-rounded ui-ic" aria-hidden="true">business</span> ${escapeHtml(ev.organisers)}</span>` : ""}
         </div>
         <div class="event-card-bottom">
           <span class="event-card-creator">VATSIM公式イベント</span>
@@ -85,13 +85,13 @@
     const createSlot = modal.querySelector("#event-create-slot");
 
     const modes = [
-      { id: "vatsim", label: "🌐 VATSIM" },
-      { id: "vatjpn", label: "🗾 VATJPN" },
+      { id: "vatsim", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>public</span> VATSIM" },
+      { id: "vatjpn", label: "<span class='material-symbols-rounded ui-ic' aria-hidden='true'>flag</span> VATJPN" },
     ];
     const extButtons = modes.map((m) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = m.label;
+      btn.innerHTML = m.label;
       btn.dataset.extTab = m.id;
       btn.addEventListener("click", () => activateExt(m.id));
       tabs.appendChild(btn);
@@ -197,7 +197,7 @@
           const when = fmtMini.format(new Date(ev.startTime));
           const route = ev.airports?.length ? ev.airports.join(" → ") : "";
           return `<a class="vatsim-mini-item" href="${escapeHtml(ev.link || VATSIM_EVENTS_PAGE)}" target="_blank" rel="noopener noreferrer">
-            <span class="vatsim-mini-when">${escapeHtml(when)}${isJapan(ev) ? " 🗾" : ""}</span>
+            <span class="vatsim-mini-when">${escapeHtml(when)}${isJapan(ev) ? " <span class='material-symbols-rounded ui-ic' aria-hidden='true'>flag</span>" : ""}</span>
             <span class="vatsim-mini-name">${escapeHtml(ev.name)}</span>
             ${route ? `<span class="vatsim-mini-route">${escapeHtml(route)}</span>` : ""}
           </a>`;
@@ -215,7 +215,7 @@
     const panel = document.createElement("div");
     panel.className = "panel vatsim-mini-panel";
     panel.id = "vatsim-mini-panel";
-    panel.innerHTML = `<div class="vatsim-mini-head">🛩 VATSIMイベント</div><div class="vatsim-mini-body"><div class="vatsim-mini-empty">読み込み中...</div></div>`;
+    panel.innerHTML = `<div class="vatsim-mini-head"><span class="material-symbols-rounded ui-ic" aria-hidden="true">flight</span> VATSIMイベント</div><div class="vatsim-mini-body"><div class="vatsim-mini-empty">読み込み中...</div></div>`;
     popular.parentElement.insertBefore(panel, popular.nextSibling);
     loadMiniPanel(panel);
   }
