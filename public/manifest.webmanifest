@@ -2,6 +2,7 @@
   "name": "AeroSocial",
   "short_name": "AeroSocial",
   "description": "フライトシミュレーターコミュニティのためのソーシャルネットワーク",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -23,13 +24,13 @@
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-maskable-192.png",
+      "src": "/icons/icon-192-maskable.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/icons/icon-maskable-512.png",
+      "src": "/icons/icon-512-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
