@@ -228,6 +228,11 @@ img, video, iframe { max-width: 100%; }
 
   /* サイドバー分を差し引いた内側3カラム */
   .main-grid { grid-template-columns: 232px minmax(0, 640px) 280px; }
+
+  /* フィード上部の整列: 横トップバー前提の sticky オフセット (78px) を
+     サイドバー型レイアウト用に詰め、全カラムの上端を揃える */
+  .app-shell { padding-top: 20px; }
+  .sidebar { top: 20px; max-height: calc(100dvh - 40px); }
 }
 @media (min-width: 1600px) {
   .main-grid { grid-template-columns: 248px minmax(0, 700px) 300px; }
