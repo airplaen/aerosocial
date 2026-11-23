@@ -447,12 +447,18 @@ router.post("/:id/vote", requireAuth, async (req, res) => {
 router.get("/:id/comments", async (req, res) => {
   const result = await pool.query(
     `SELECT c.id, c.text, c.created_at AS "createdAt",
-            u.callsign AS "authorCallsign", u.name AS "authorName", u.id AS "authorId"
+            u.callsign AS "authorCallsign", u.name AS "authorName", u.id AS "authorId",
+            u.hue AS "authorHue", u.avatar_path AS "authorAvatarPath"
      FROM comments c JOIN users u ON u.id = c.author_id
      WHERE c.post_id = $1 ORDER BY c.created_at ASC`,
     [req.params.id]
   );
-  res.json({ comments: result.rows });
+  const comments = result.rows.map((r) => ({
+    ...r,
+    authorAvatarPath: undefined,
+    authorAvatarUrl: r.authorAvatarPath ? `/uploads/${r.authorAvatarPath}` : null,
+  }));
+  res.json({ comments });
 });
 
 // POST /api/posts/:id/comments  { text }
@@ -469,12 +475,17 @@ router.post("/:id/comments", requireAuth, async (req, res) => {
     );
     // req.user comes from the JWT, which only carries id/callsign, so the
     // display name is fetched separately here for the realtime broadcast.
-    const authorRow = await pool.query("SELECT name FROM users WHERE id = $1", [req.user.id]);
+    const authorRow = await pool.query("SELECT name, hue, avatar_path FROM users WHERE id = $1", [req.user.id]);
+    const author = authorRow.rows[0] || {};
     const comment = {
-      ...result.rows[0],
+      id: result.rows[0].id,
+      text: result.rows[0].text,
+      createdAt: result.rows[0].created_at,
       authorCallsign: req.user.callsign,
-      authorName: authorRow.rows[0]?.name || req.user.callsign,
+      authorName: author.name || req.user.callsign,
       authorId: req.user.id,
+      authorHue: author.hue,
+      authorAvatarUrl: author.avatar_path ? `/uploads/${author.avatar_path}` : null,
     };
     broadcast("comment:new", { postId: req.params.id, comment });
     res.status(201).json({ comment });

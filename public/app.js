@@ -4517,6 +4517,29 @@
     `;
   }
 
+  // One comment (返信) as a rich row: the commenter's avatar (with a
+  // subtle ring), a bubble with name / @callsign / time, then the text.
+  // Avatar and name open the commenter's profile (bound in
+  // attachPostListeners via [data-action="view-profile"]).
+  function commentHtml(c) {
+    const callsign = c.authorCallsign || "";
+    return `
+      <div class="comment">
+        <div class="comment-avatar" data-action="view-profile" data-callsign="${escapeHtml(callsign)}">
+          ${avatarHtml({ name: c.authorName, hue: c.authorHue, avatarUrl: c.authorAvatarUrl }, 32)}
+        </div>
+        <div class="comment-body">
+          <div class="comment-head">
+            <b class="comment-name" data-action="view-profile" data-callsign="${escapeHtml(callsign)}">${escapeHtml(c.authorName || callsign)}</b>
+            <span class="comment-handle">@${escapeHtml(callsign)}</span>
+            <span class="comment-time">${fmtTime(c.createdAt)}</span>
+          </div>
+          <div class="comment-text">${linkify(escapeHtml(c.text))}</div>
+        </div>
+      </div>
+    `;
+  }
+
   function renderPostHtml(post) {
     const mine = state.user && post.authorId === state.user.id;
     const isOpen = state.openComments.has(post.id);
@@ -4560,10 +4583,9 @@
 
         ${isOpen ? `
           <div class="comments">
-            ${comments.map((c) => `
-              <div class="comment"><b>${escapeHtml(c.authorName || c.authorCallsign)}</b><span>${linkify(escapeHtml(c.text))}</span></div>
-            `).join("")}
+            ${comments.map((c) => commentHtml(c)).join("")}
             <form class="comment-form" data-action="comment-form">
+              ${state.user ? `<div class="comment-form-avatar">${avatarHtml(state.user, 30)}</div>` : ""}
               <input name="text" placeholder="コメントを入力..." autocomplete="off" />
               <button type="submit">送信</button>
             </form>
@@ -4706,13 +4728,12 @@
       });
     }
 
-    const profileLink = el.querySelector('[data-action="view-profile"]');
-    if (profileLink) {
+    el.querySelectorAll('[data-action="view-profile"]').forEach((profileLink) => {
       profileLink.addEventListener("click", (e) => {
         e.stopPropagation();
         openUserProfile(profileLink.dataset.callsign);
       });
-    }
+    });
   }
 
   function attachFeedListeners() {
