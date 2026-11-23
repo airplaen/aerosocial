@@ -356,3 +356,27 @@ img, video, iframe { max-width: 100%; }
     padding: 18px 16px calc(20px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* ---- Rich comments: 返信者のUIを豪華に (2026-11-23) ---- */
+.comment { display: flex; gap: 10px; margin-bottom: 12px; font-size: 14px; }
+.comment-avatar { flex-shrink: 0; cursor: pointer; }
+.comment-avatar .avatar {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px rgba(122, 156, 255, 0.55);
+}
+.comment-body {
+  flex: 1; min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px 14px 14px 14px;
+  padding: 9px 12px 10px;
+}
+.comment-head { display: flex; align-items: baseline; gap: 6px; }
+.comment-name { color: var(--text); font-size: 13.5px; cursor: pointer; }
+.comment-handle { color: var(--text-dim); font-size: 12px; }
+.comment-time { color: var(--text-dim); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+.comment-text { font-size: 14px; line-height: 1.7; margin-top: 2px; overflow-wrap: anywhere; }
+.comment-form { align-items: center; }
+.comment-form-avatar { flex-shrink: 0; display: flex; }
+.comment-form-avatar .avatar {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px rgba(122, 156, 255, 0.35);
+}
