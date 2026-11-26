@@ -789,3 +789,23 @@ body::before {
   background: var(--bg);
 }
 .composer { border-color: var(--border); }
+
+/* ================================================================
+   ヘッダーの文字を改行させない (2026-11-26 ユーザー要望)
+   ウィンドウを狭めたとき (特に 900〜1200px の横並びヘッダー)、
+   ナビボタンのラベルがボタンの中で折り返して2行になっていた。
+   ラベルは常に1行に固定し、入り切らない分はボタンの並び自体を
+   横スクロールに逃がす (レイアウトは崩さない)。
+   ================================================================ */
+.topbar-btn { white-space: nowrap; flex-shrink: 0; }
+.brand { flex-shrink: 0; }
+@media (max-width: 1199.98px) {
+  .topbar-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .topbar-actions::-webkit-scrollbar { display: none; }
+}
+/* サイドバーのパネル見出しも狭い列で折り返さない */
+.quake-panel-title, .events-sidebar-title, .news-panel-title { white-space: nowrap; }
