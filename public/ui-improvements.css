@@ -775,3 +775,17 @@ body::before {
   /* タブバー内側のボタンもピル型をやめる (外枠は 18px 済み) */
   .mobile-tabbar .tab-btn { border-radius: 14px; }
 }
+
+/* ================================================================
+   カード類の背景をページ背景と同色に (2026-11-26 ユーザー要望)
+   フィード・投稿欄・サイドバーのパネル等、いわゆる「箱」の背景を
+   ページ背景 (--bg) と同じ色に揃え、区切りは枠線と影だけにする。
+   中の小要素 (チップ・行・入力欄の --panel-2 系) は一段差を残す。
+   ================================================================ */
+.topbar, .composer, .post,
+.quake-panel, .events-sidebar-panel, .vatsim-mini-panel, .news-panel,
+.flight-card, .flight-card.flight-card-rich,
+.modal, .mobile-tabbar {
+  background: var(--bg);
+}
+.composer { border-color: var(--border); }
