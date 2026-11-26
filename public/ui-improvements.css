@@ -946,3 +946,38 @@ body::before { background: none; }
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 16px 36px -22px rgba(15, 23, 42, 0.22);
   --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 24px 48px -22px rgba(15, 23, 42, 0.3);
 }
+
+/* ================================================================
+   スマホ版も同様に (2026-11-26 ユーザー要望) ＋ ホバー演出の残り全止め
+   PC向けに止めた「光る/浮く/拡大する」演出のうち、styles.css 側に
+   残っていた分 (投稿カードの浮き上がり、YouTube/ニュースカードの
+   色付き影と拡大、行ホバーの浮き上がり等) を全プラットフォームで
+   止める。スマホではこれらがタップ後に残る「貼り付きホバー」に
+   なるため、タップのハイライト点滅と、押したときの縮小・回転も
+   合わせて止める。
+   ================================================================ */
+.post:hover { transform: none; box-shadow: var(--shadow-card); }
+.youtube-card:hover { transform: none; box-shadow: none; border-color: var(--border); }
+.youtube-card:hover .youtube-thumb { transform: none; }
+.youtube-card:hover .youtube-play-btn { transform: translate(-50%, -50%); box-shadow: none; }
+.news-item:hover, .news-hub-hero:hover, .news-hub-card:hover {
+  transform: none; box-shadow: none; border-color: var(--border);
+}
+.events-sidebar-item:hover, .popular-flight-item:hover { transform: none; border-color: var(--border); }
+.anime-card--has-image:hover { transform: none; box-shadow: none; }
+.avatar:hover { box-shadow: none; transform: none; }
+.icon-btn:hover, .action-btn:hover, .poll-option-btn:hover { transform: none; }
+.memo-fab:hover, .memo-fab:active { transform: none; }
+.flight-fullscreen-close:hover { transform: none; }
+.btn:active { transform: none; }
+.mobile-tabbar .tab-btn:active { transform: none; }
+#theme-toggle-btn:active .material-symbols-rounded { transform: none; }
+.news-hub-back:active, .modal-close:active { transform: none; }
+.story-cell:active .story-ring { transform: none; }
+@media (hover: none) {
+  * { -webkit-tap-highlight-color: transparent; }
+  .btn-ghost:hover, .leaderboard-row:hover, .memo-list-item:hover,
+  .event-card:hover, .logbook-recent-row:hover, .poll-option-btn:hover,
+  .weather-candidate-chip:hover, .profile-tab-btn:hover, .news-hub-tab:hover,
+  .news-hub-back:hover { border-color: var(--border); }
+}
