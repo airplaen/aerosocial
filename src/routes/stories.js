@@ -5,6 +5,7 @@ const pool = require("../db");
 const { requireAuth, optionalAuth } = require("../middleware/auth");
 const upload = require("../middleware/upload");
 const { broadcast } = require("../ws");
+const push = require("../lib/push");
 
 const router = express.Router();
 
@@ -126,6 +127,43 @@ router.get("/", optionalAuth, async (req, res) => {
   }
 });
 
+// プッシュ通知 (通常投稿の routes/posts.js の notifyNewPost と同じ宛先
+// ルール): notify_pref = 'all' の全員 +、'following' の場合は投稿者の
+// フォロワー。投稿者本人には送らない。fire-and-forget で、失敗しても
+// 投稿自体には影響しない。
+// 連続投稿で通知が何発も飛ぶのを防ぐため、送るのは「その人の有効な
+// ストーリーが0件 → 1件目」のときだけ (呼び出し側で判定して渡す)。
+async function notifyNewStory(story) {
+  try {
+    const result = await pool.query(
+      `SELECT id FROM users
+       WHERE id != $1
+         AND (
+           notify_pref = 'all'
+           OR (notify_pref = 'following' AND id IN (
+             SELECT follower_id FROM follows WHERE followee_id = $2
+           ))
+         )`,
+      [story.authorId, story.authorId]
+    );
+    const userIds = result.rows.map((r) => r.id);
+    if (!userIds.length) return;
+
+    const body = story.text
+      ? story.text.slice(0, 100)
+      : (story.imageUrl ? "画像のストーリーを投稿しました" : "新しいストーリーを投稿しました");
+
+    await push.pushToUsers(userIds, {
+      title: `${story.authorCallsign}がストーリーを投稿しました`,
+      body,
+      url: "/",
+      tag: `story-${story.id}`,
+    });
+  } catch (err) {
+    console.error("notifyNewStory failed:", err);
+  }
+}
+
 // POST /api/stories — 新規投稿 (multipart: image は任意、text/hue はフィールド)。
 router.post("/", requireAuth, upload.single("image"), async (req, res) => {
   const uploadedPath = req.file ? req.file.filename : null;
@@ -149,7 +187,8 @@ router.post("/", requireAuth, upload.single("image"), async (req, res) => {
        WHERE author_id = $1 AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
       [req.user.id]
     );
-    if (Number(active.rows[0].n) >= MAX_ACTIVE_PER_USER) {
+    const activeCount = Number(active.rows[0].n);
+    if (activeCount >= MAX_ACTIVE_PER_USER) {
       discardUpload();
       return res.status(429).json({ error: `ストーリーは同時に${MAX_ACTIVE_PER_USER}件までです。` });
     }
@@ -172,6 +211,8 @@ router.post("/", requireAuth, upload.single("image"), async (req, res) => {
     );
     const story = serializeStory(result.rows[0], req.user.id);
     broadcast("story:new", story);
+    // 1件目だけプッシュ通知する (連続投稿での通知スパム防止)。
+    if (activeCount === 0) notifyNewStory(story);
     res.status(201).json({ story });
   } catch (err) {
     console.error(err);
