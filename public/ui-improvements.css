@@ -908,3 +908,21 @@ body::before { background: none; }
 @media (min-width: 1200px) {
   .topbar-actions .topbar-btn:hover { box-shadow: none; }
 }
+
+/* ================================================================
+   エフェクト全廃 (2026-11-26 ユーザー要望)
+   アニメーションとトランジションを全体で無効化する
+   (スライドイン・フェード・点滅パルス・拡大縮小・シマー等は
+   一切動かず、表示は即時に切り替わる)。例外は引っ張って更新の
+   スピナーだけ (読み込み中かどうかを示す機能のため)。
+   ストーリーの進行バーはJS駆動なので影響を受けない。
+   ================================================================ */
+*, *::before, *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+.ptr-indicator.ptr-spinning .ptr-icon {
+  animation: ptr-spin 0.7s linear infinite !important;
+}
