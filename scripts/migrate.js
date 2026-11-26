@@ -371,6 +371,35 @@ function main() {
   db.exec("CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements (created_at DESC)");
   console.log("Ensured announcements table exists.");
 
+  // --- ストーリー機能 (24時間で消える投稿) -----------------------------
+  // Same "explicit re-create after the try/catch above" reasoning as the
+  // other feature tables: guarantees these exist regardless of whether
+  // the first db.exec(sql) aborted partway through. Harmless no-op if
+  // schema.sql already created them. See src/routes/stories.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stories (
+      id         TEXT PRIMARY KEY,
+      author_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      text       TEXT,
+      image_path TEXT,
+      hue        INTEGER NOT NULL DEFAULT 200,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      expires_at TEXT NOT NULL
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories (expires_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_stories_author ON stories (author_id, created_at)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS story_views (
+      story_id   TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      PRIMARY KEY (story_id, user_id)
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_story_views_story ON story_views (story_id)");
+  console.log("Ensured stories/story_views tables exist.");
+
   db.close();
   console.log("Done.");
 }
