@@ -35,7 +35,6 @@
 
   const TOKEN_KEY = "aerosocial_token";
   const SIMBRIEF_USERNAME_KEY = "aerosocial_simbrief_username";
-  const WARNING_AREA_KEY = "aerosocial_warning_area";
   const THEME_KEY = "aerosocial_theme";
   // 運営メッセージの「未読」バッジ用。既読管理はサーバーに持たせていない
   // (announcementsテーブルは送信履歴のみ)ので、最後に開いた時点の最新
@@ -176,16 +175,6 @@
       // /api/weather/summary のレスポンス(今日/明日のサマリーと
       // 詳細モーダル用の3時間ごとの予報を含む)
       data: null,
-    },
-    // ---- 気象庁 気象警報・注意報 (地震情報パネル下部) ----
-    warningAlert: {
-      areas: null, // GET /api/weather/warning-areas のプルダウン選択肢
-      areasLoading: false,
-      // 前回選んだ地域をlocalStorageから復元(未選択ならnull)。
-      areaCode: localStorage.getItem(WARNING_AREA_KEY) || "",
-      loading: false,
-      error: "",
-      data: null, // GET /api/weather/warnings のレスポンス
     },
     // Admin-configured ad embed (AdSense/AdMax/etc. snippet), loaded from
     // GET /api/ads on boot. `code` is only ever non-empty when `enabled`
@@ -802,7 +791,6 @@
       }
     }
     if (state.user) await checkAdminStatus();
-    if (state.user) syncWarningAreaSubscription();
     state.booted = true;
     render();
     if (state.user) {
@@ -1580,7 +1568,6 @@
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("message", (event) => {
       if (event.data && event.data.type === "eew") showEewPopup(event.data);
-      if (event.data && event.data.type === "warning") showWarningBar(event.data);
     });
   }
 
@@ -1648,56 +1635,9 @@
     if (eewPopupTimer) { clearTimeout(eewPopupTimer); eewPopupTimer = null; }
   }
 
-  // ---- 気象警報バー ----
-  // showEewPopup/hideEewPopupと同じ「上から差し込むバナー」の仕組みを
-  // 気象警報向けに複製したもの。トリガーは2経路:
-  //   1) Web Push受信時、タブが開いていればsw.jsからのpostMessage
-  //      (上のnavigator.serviceWorker "message" リスナー)。実際の検知・
-  //      配信元は scripts/weather-warning-push-bridge.js。P2PQuakeの
-  //      ようなリアルタイムWSフィードがJMA側に無いため、EEWと違って
-  //      「タブを開いている間だけの直接接続」経路は存在しない —
-  //      Web Pushが常に唯一の配信経路になる。
-  //   2) 管理者パネルのテスト配信ボタン(isTest:trueでこの関数を直接
-  //      呼ぶだけ — サーバーには一切ラウンドトリップしない。地震速報の
-  //      テスト表示ボタンと同じ「実配信はしない」方針)
-  let warningBarTimer = null;
-  function showWarningBar(data) {
-    let el = document.getElementById("warning-bar");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "warning-bar";
-      el.className = "warning-bar";
-      document.body.appendChild(el);
-    }
-
-    el.innerHTML = `
-      <div class="warning-bar-inner">
-        ${data.isTest ? `<div class="quake-test-badge">テスト配信</div>` : ""}
-        <div class="warning-bar-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> ${escapeHtml(data.areaName || "気象警報・注意報")}</div>
-        <div class="warning-bar-body">${escapeHtml(data.headline || "")}</div>
-      </div>
-      <button type="button" class="warning-bar-close" aria-label="閉じる">✕</button>
-    `;
-    el.querySelector(".warning-bar-close").addEventListener("click", hideWarningBar);
-
-    el.classList.remove("show");
-    void el.offsetWidth;
-    el.classList.add("show");
-
-    if (warningBarTimer) clearTimeout(warningBarTimer);
-    warningBarTimer = setTimeout(hideWarningBar, 10000);
-  }
-
-  function hideWarningBar() {
-    const el = document.getElementById("warning-bar");
-    if (!el) return;
-    el.classList.remove("show");
-    if (warningBarTimer) { clearTimeout(warningBarTimer); warningBarTimer = null; }
-  }
-
   // 運営からのメッセージ(管理者パネル→POST /api/admin/announcements)を
-  // 受信した全タブに即時表示するバナー。showWarningBar/hideWarningBarと
-  // 同じ「上から差し込む」仕組みだが、配信経路はWebSocket
+  // 受信した全タブに即時表示するバナー。showEewPopupと同じ
+  // 「上から差し込む」仕組みだが、配信経路はWebSocket
   // (announcement:new — handleWsMessage参照)のみで、Web Push側の
   // sw.js "message" リレーは使わない(警報と違い、こちらは配信元が
   // 自前のサーバーなので、タブが開いていれば必ずWSで直接届くため)。
@@ -2110,14 +2050,12 @@
         ${q ? renderQuakeCardHtml(q) : `<div class="quake-empty">受信した地震情報はまだありません</div>`}
         <button type="button" class="btn btn-ghost quake-test-btn" id="quake-test-btn" ${state.quakeTestConnecting ? "disabled" : ""}>${testBtnLabel}</button>
         ${renderWeatherSectionHtml()}
-        ${renderWarningSectionHtml()}
       </div>
     `;
 
     slot.querySelector("#quake-test-btn").addEventListener("click", toggleQuakeSandbox);
     if (q) initQuakeMap(q.hypocenter, slot);
     wireWeatherSection(slot);
-    wireWarningSection(slot);
   }
 
   // ---------------------------------------------------------------- ランキング簡易表示（地震情報パネル下部）
@@ -2440,128 +2378,6 @@
     document.addEventListener("keydown", function onKey(e) {
       if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
     });
-  }
-
-  // ---------------------------------------------------------------- 気象警報・注意報 (気象庁, 地震情報パネル下部)
-  // 天気予報検索窓のさらに下に、選んだ都道府県の気象警報・注意報の見出し
-  // 文を表示する。データ元はsrc/routes/weather.jsのGET /api/weather/
-  // warnings（気象庁の非公式JSONをサーバー側でプロキシ）。
-  //
-  // 2026年5月29日の気象庁システム改定で新形式のJSONに変わっており、
-  // 個々の警報種別を確実に判別できる保証がまだ薄いため、サーバー側は
-  // 発表文の見出し(headlineText)をそのまま返すだけに留めている。見出し
-  // が取得できなかった場合も「警報は無い」と決めつけず、気象庁サイトへの
-  // リンクで手動確認を促す(詳細はsrc/routes/weather.jsのコメント参照)。
-  async function loadWarningAreas() {
-    if (state.warningAlert.areas || state.warningAlert.areasLoading) return;
-    state.warningAlert.areasLoading = true;
-    try {
-      const { areas } = await api("/api/weather/warning-areas");
-      state.warningAlert.areas = areas;
-    } catch {
-      // 選択肢が読めなくてもパネル全体を壊さない — プルダウンが空の
-      // まま表示され、後述のrenderで「読み込みに失敗」を出す。
-    } finally {
-      state.warningAlert.areasLoading = false;
-      renderQuakePanelEverywhere();
-    }
-  }
-
-  async function selectWarningArea(areaCode) {
-    state.warningAlert.areaCode = areaCode;
-    state.warningAlert.data = null;
-    state.warningAlert.error = "";
-    if (areaCode) localStorage.setItem(WARNING_AREA_KEY, areaCode);
-    else localStorage.removeItem(WARNING_AREA_KEY);
-    // ログイン中はアカウントにも保存し、サーバー側のpush配信/WSバーの
-    // 対象に含める(未ログインならローカル表示のみで、通知は届かない)。
-    if (state.token) {
-      api("/api/weather/warning-subscription", { method: "PUT", body: JSON.stringify({ areaCode }) }).catch(() => {
-        // 保存に失敗しても閲覧自体は続けられるので、パネルは壊さない。
-      });
-    }
-    if (!areaCode) { renderQuakePanelEverywhere(); return; }
-
-    state.warningAlert.loading = true;
-    renderQuakePanelEverywhere();
-    try {
-      state.warningAlert.data = await api(`/api/weather/warnings?areaCode=${encodeURIComponent(areaCode)}`);
-    } catch (err) {
-      state.warningAlert.error = err.message;
-    } finally {
-      state.warningAlert.loading = false;
-      renderQuakePanelEverywhere();
-    }
-  }
-
-  // ログイン直後、アカウントに保存されている地域とこのブラウザの
-  // localStorageの選択にズレがないか確認する。サーバー側の値がある
-  // 場合はそちらを正として採用(他の端末で選んだ設定を引き継ぐため)、
-  // サーバーが未設定でローカルだけ選んでいる場合はサーバーへ反映する。
-  async function syncWarningAreaSubscription() {
-    try {
-      const { areaCode: serverAreaCode } = await api("/api/weather/warning-subscription");
-      const localAreaCode = state.warningAlert.areaCode;
-      if (serverAreaCode && serverAreaCode !== localAreaCode) {
-        await selectWarningArea(serverAreaCode);
-      } else if (!serverAreaCode && localAreaCode) {
-        api("/api/weather/warning-subscription", { method: "PUT", body: JSON.stringify({ areaCode: localAreaCode }) }).catch(() => {});
-      }
-    } catch {
-      // 起動をブロックしない — 失敗してもローカルの選択のまま動作を続ける。
-    }
-  }
-
-  function renderWarningSectionHtml() {
-    const w = state.warningAlert;
-    const options = (w.areas || [])
-      .map((a) => `<option value="${a.code}" ${a.code === w.areaCode ? "selected" : ""}>${escapeHtml(a.name)}</option>`)
-      .join("");
-
-    let body = "";
-    if (w.error) {
-      body = `<div class="error-banner">${escapeHtml(w.error)}</div>`;
-    } else if (w.loading && !w.data) {
-      body = `<div class="spinner-row">読み込み中...</div>`;
-    } else if (w.data) {
-      const d = w.data;
-      const updated = d.reportDatetime ? fmtTime(d.reportDatetime) : "";
-      body = `
-        <div class="warning-alert-result">
-          ${d.headlines
-            ? `<ul class="warning-alert-headlines">${d.headlines.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`
-            : `<div class="warning-alert-none">${d.fetchError
-                ? "気象庁の情報取得に失敗しました。時間をおいて再度お試しください。"
-                : "見出しを取得できませんでした。最新の状況は気象庁サイトでご確認ください。"}</div>`
-          }
-          <div class="warning-alert-meta">
-            ${d.publishingOffice ? `${escapeHtml(d.publishingOffice)}発表　` : ""}${updated ? `${updated}更新　` : ""}
-            <a href="${d.officialUrl}" target="_blank" rel="noopener noreferrer">気象庁サイトで詳細を見る →</a>
-          </div>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="weather-section warning-alert-section">
-        <div class="weather-section-title"><span class="material-symbols-rounded ui-ic" aria-hidden="true">warning</span> 気象警報・注意報</div>
-        <select class="warning-alert-select" id="warning-alert-select">
-          <option value="">地域を選択...</option>
-          ${options}
-        </select>
-        ${body}
-      </div>
-    `;
-  }
-
-  function wireWarningSection(slot) {
-    const select = slot.querySelector("#warning-alert-select");
-    if (!select) return;
-    if (!state.warningAlert.areas) loadWarningAreas();
-    else if (state.warningAlert.areaCode && !state.warningAlert.data && !state.warningAlert.loading && !state.warningAlert.error) {
-      selectWarningArea(state.warningAlert.areaCode); // localStorageから復元した地域を初回だけ自動取得
-    }
-    select.addEventListener("change", () => selectWarningArea(select.value));
   }
 
   // ---------------------------------------------------------------- render: auth
@@ -6501,8 +6317,6 @@
       quakeTestHypocenter: "テスト震源",
       quakeTestScale: 55,
       quakeTestAreaCount: 3,
-      warningTestAreaCode: "",
-      warningTestHeadline: "（テスト）大雨警報が発表されました。土砂災害に警戒してください。",
       announcements: [],
       announcementsLoaded: false,
       announcementsLoading: false,
@@ -6523,7 +6337,6 @@
           <button type="button" data-tab="ads">広告</button>
           <button type="button" data-tab="users">ユーザー</button>
           <button type="button" data-tab="quake">地震速報</button>
-          <button type="button" data-tab="warning">気象警報</button>
         </div>
         <div id="admin-content"></div>
       </div>
@@ -6544,7 +6357,6 @@
       else if (tab === "announcements") { renderAnnouncementsTab(); if (!adminState.announcementsLoaded) loadAnnouncements(); }
       else if (tab === "ads") { renderAdsTab(); if (!adminState.adsLoaded) loadAds(); }
       else if (tab === "quake") { renderQuakeTestTab(); }
-      else if (tab === "warning") { renderWarningTestTab(); if (!state.warningAlert.areas) loadWarningAreas().then(renderWarningTestTab); }
       else { renderUsersTab(); if (!adminState.users.length) loadUsers(); }
     }
 
@@ -7038,51 +6850,6 @@
       });
       document.getElementById("admin-quake-test-cancelled").addEventListener("click", () => {
         showEewPopup({ isTest: true, cancelled: true });
-      });
-    }
-
-    // ---------------- weather warning test tab ----------------
-    // 地震速報のテストタブと同じ方針: サーバーには一切ラウンドトリップ
-    // せず、このブラウザでshowWarningBar()を直接呼んで見た目だけ試す。
-    // 実際のユーザーへ本物のpush通知は一切送らない。
-    function renderWarningTestTab() {
-      if (adminState.tab !== "warning") return;
-
-      const areas = state.warningAlert.areas || [];
-      const options = areas
-        .map((a) => `<option value="${a.code}" ${a.code === adminState.warningTestAreaCode ? "selected" : ""}>${escapeHtml(a.name)}</option>`)
-        .join("");
-
-      contentEl.innerHTML = `
-        <p class="admin-ads-hint">気象警報・注意報の上部スライドインバナーを、実際の配信を待たずにこの画面から試せます。表示されるのはテスト配信バッジ付きのバナーのみで、実際のユーザーには一切通知が送られません。</p>
-        <form id="admin-warning-test-form">
-          <div class="field">
-            <label>地域</label>
-            <select id="admin-warning-test-area">
-              <option value="">選択...</option>
-              ${options}
-            </select>
-          </div>
-          <div class="field">
-            <label>見出し文</label>
-            <textarea id="admin-warning-test-headline" rows="3" maxlength="200">${escapeHtml(adminState.warningTestHeadline)}</textarea>
-          </div>
-          <button type="submit" class="btn btn-primary">バナーを表示</button>
-        </form>
-      `;
-
-      document.getElementById("admin-warning-test-form").addEventListener("submit", (e) => {
-        e.preventDefault();
-        const areaCode = document.getElementById("admin-warning-test-area").value;
-        adminState.warningTestAreaCode = areaCode;
-        adminState.warningTestHeadline = document.getElementById("admin-warning-test-headline").value.trim()
-          || "（テスト）大雨警報が発表されました。土砂災害に警戒してください。";
-        const area = areas.find((a) => a.code === areaCode);
-        showWarningBar({
-          isTest: true,
-          areaName: area ? area.name : "テスト地域",
-          headline: adminState.warningTestHeadline,
-        });
       });
     }
 

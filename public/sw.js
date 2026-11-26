@@ -11,7 +11,7 @@
 // picks those up on the very next request without relying on this
 // string at all. It only exists so activate() can drop a genuinely
 // obsolete cache format if this file's own logic changes shape.
-const CACHE_VERSION = "aerosocial-shell-v27";
+const CACHE_VERSION = "aerosocial-shell-v28";
 const SHELL_ASSETS = [
   "/",
   "/app.js",
@@ -94,12 +94,6 @@ self.addEventListener("push", (event) => {
   }
 
   const isEew = data.type === "eew";
-  // 気象警報も、EEWほどの緊急度ではないにせよ「タブを開いている人には
-  // OS通知と二重にでもアプリ内バナーで気づいてほしい」という点は同じ
-  // なので、以下のpostMessageリレーはEEWと同じ扱いにしている
-  // (requireInteraction/vibrateはEEW限定のまま — 頻度も高くなりうる
-  // 気象警報まで毎回バイブさせると煩わしいため)。
-  const isWarning = data.type === "warning";
   const title = data.title || "AeroSocial";
   const options = {
     body: data.body || "",
@@ -118,11 +112,11 @@ self.addEventListener("push", (event) => {
     Promise.all([
       self.registration.showNotification(title, options),
       // すでに開いているタブがあれば、生のpayloadをそのまま渡す — app.js
-      // 側のnavigator.serviceWorker "message" リスナーがshowEewPopup()/
-      // showWarningBar()を呼び、OS通知よりリッチなアプリ内スライドイン
+      // 側のnavigator.serviceWorker "message" リスナーがshowEewPopup()を
+      // 呼び、OS通知よりリッチなアプリ内スライドイン
       // ポップアップを表示できる。OS通知と二重に出ても構わない（安全側
       // に倒す）。
-      isEew || isWarning
+      isEew
         ? self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
             clientList.forEach((client) => client.postMessage(data));
           })
