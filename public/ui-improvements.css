@@ -783,7 +783,7 @@ body::before {
    中の小要素 (チップ・行・入力欄の --panel-2 系) は一段差を残す。
    ================================================================ */
 .topbar, .composer, .post,
-.quake-panel, .events-sidebar-panel, .vatsim-mini-panel, .news-panel,
+.quake-panel, .events-sidebar-panel, .vatsim-mini-panel, .news-panel, .popular-flights,
 .flight-card, .flight-card.flight-card-rich,
 .modal, .mobile-tabbar {
   background: var(--bg);

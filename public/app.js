@@ -950,7 +950,6 @@
     try {
       const { items } = await api("/api/news?limit=60");
       state.news = items;
-      renderNewsPanel();
       renderNewsHubTabs();
       renderNewsHubBody();
     } catch {
@@ -1365,7 +1364,6 @@
         // browser talking to APITube directly.
         if (!state.news.some((n) => n.id === msg.payload.id)) {
           state.news = [msg.payload, ...state.news].slice(0, 90);
-          renderNewsPanel();
           renderNewsHubTabs();
           renderNewsHubBody();
           if (msg.payload.isBreaking) showNewsFlashPopup(msg.payload);
@@ -2695,7 +2693,6 @@
 
           <div class="sidebar sidebar-right">
             <div id="popular-flights-slot"></div>
-            <div id="news-panel-slot"></div>
           </div>
         </div>
 
@@ -2946,9 +2943,6 @@
     const content = document.getElementById("mobile-panel-content");
     if (kind === "flights") {
       renderPopularFlights(content);
-      // ニュースは「人気のフライトの下部」という要件をモバイルでも守る
-      // ため、同じボトムシートの続きにappendする(専用タブは増やさない)。
-      renderNewsPanel(content, true);
     } else if (kind === "quake") {
       quakeUnseen = false;
       updateQuakeTabBadge();
@@ -3996,64 +3990,10 @@
     });
   }
 
-  // 「🗞️ 日本のニュース」パネル。人気のフライトパネルの下部に表示する
-  // (デスクトップは #news-panel-slot、モバイルは「人気のフライト」の
-  // ボトムシートの続きにappendして表示 — openMobilePanel参照)。
-  // targetElを渡さない場合はデスクトップの#news-panel-slotを使い、その
-  // 場合のみ丸ごと置き換える。append=trueの場合はtargetEl内に追記する
-  // (モバイルのボトムシートは人気のフライトと同じ入れ物を共有するため)。
-  function renderNewsPanel(targetEl, append) {
-    const slot = targetEl || document.getElementById("news-panel-slot");
-    if (!slot) return;
-    const list = state.news || [];
-
-    const html = !list.length
-      ? (append || targetEl ? `<div class="quake-empty">まだニュースはありません</div>` : "")
-      : `
-        <div class="news-panel">
-          <div class="news-panel-title"><span><span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span></span> 日本のニュース</div>
-          <div class="news-panel-list">
-            ${list.slice(0, 20).map((n) => `
-              <button type="button" class="news-item${n.isBreaking ? " news-item-breaking" : ""}" data-news-id="${escapeHtml(n.id)}">
-                ${n.imageUrl
-                  ? `<img class="news-item-thumb" src="${escapeHtml(n.imageUrl)}" loading="lazy" alt="" data-fallback-hue="${hueFromString(n.source || n.title)}" />`
-                  : `<div class="news-item-thumb news-item-thumb-fallback" style="--news-hue:${hueFromString(n.source || n.title)}"><span class="material-symbols-rounded ui-ic" aria-hidden="true">newspaper</span></div>`}
-                <div class="news-item-body">
-                  ${n.isBreaking ? `<span class="news-badge-breaking">速報</span>` : ""}
-                  <div class="news-item-title">${escapeHtml(n.title)}</div>
-                  <div class="news-item-meta">
-                    <span class="news-item-source">${escapeHtml(n.source || "")}</span>
-                    <span>・</span>
-                    <span>${fmtTime(n.publishedAt || n.createdAt)}</span>
-                  </div>
-                </div>
-              </button>
-            `).join("")}
-          </div>
-          <div class="news-panel-credit">Powered by Google ニュース</div>
-        </div>
-      `;
-
-    if (append) {
-      slot.insertAdjacentHTML("beforeend", html);
-    } else {
-      slot.innerHTML = html;
-    }
-
-    slot.querySelectorAll(".news-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        const item = state.news.find((n) => n.id === el.dataset.newsId);
-        if (item) openNewsDetailModal(item);
-      });
-    });
-
-    // 記事から拾ってきた画像(og:image)は、ホットリンク拒否やリンク切れで
-    // 読み込みに失敗することがある。失敗したらその場でフォールバック表示
-    // (色付きの🗞️アイコン)に差し替える。
-    slot.querySelectorAll(".news-item-thumb[data-fallback-hue]").forEach((img) => {
-      img.addEventListener("error", () => swapNewsThumbToFallback(img), { once: true });
-    });
-  }
+  // 「日本のニュース」サイドバーパネルは 2026-11-26 のユーザー要望で
+  // フィードから撤去した (デスクトップ右サイドバー＋モバイルの
+  // 人気のフライトシート内)。ニュース自体はトップバーの「ニュース」
+  // ボタンから開くニュースハブで引き続き読める。
 
   function swapNewsThumbToFallback(imgEl, baseClass) {
     const hue = imgEl.dataset.fallbackHue || "28";
@@ -4065,8 +4005,7 @@
   }
 
   // ---------------------------------------------------------------- ニュースハブ（おしゃれなニュースサイト風ポップアップ）
-  // トップバー/モバイルメニューの「🗞️ ニュース」ボタンから開く。既存の
-  // #news-panel-slot(サイドバーの簡易リスト)とは別に、大きめのヒーロー
+  // トップバー/モバイルメニューの「🗞️ ニュース」ボタンから開く。大きめのヒーロー
   // 記事+グリッドで一覧できる専用モーダルを表示する。データソースは
   // 同じstate.newsで、記事クリックは既存のopenNewsDetailModal()を再利用
   // する(本文は複製しない方針も踏襲)。
