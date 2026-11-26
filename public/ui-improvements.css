@@ -409,7 +409,7 @@ img, video, iframe { max-width: 100%; }
 
 /* ---------- 5-0. トークン ---------- */
 :root {
-  --radius: 20px;
+  --radius: 14px;
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 36px -20px rgba(2, 6, 18, 0.75);
   --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(20, 60, 160, 0.55);
   --sky-glass: linear-gradient(165deg, rgba(77, 163, 255, 0.09), rgba(139, 123, 255, 0.05) 48%, rgba(126, 231, 199, 0.05)), var(--panel);
@@ -445,11 +445,11 @@ body::before {
 .topbar {
   background: var(--sky-glass);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 12px;
   box-shadow: var(--shadow-card);
 }
 .topbar::after { display: none; }
-.topbar-btn { border-radius: 999px; }
+.topbar-btn { border-radius: 10px; }
 @media (max-width: 1199.98px) {
   .topbar {
     top: 10px;
@@ -462,11 +462,11 @@ body::before {
   .topbar {
     top: 16px;
     height: calc(100dvh - 32px);
-    border-radius: 22px;
+    border-radius: 14px;
     border-right: 1px solid var(--border);
     padding: 18px 12px 14px;
   }
-  .topbar-actions .topbar-btn { border-radius: 14px; padding: 11px 14px; }
+  .topbar-actions .topbar-btn { border-radius: 10px; padding: 11px 14px; }
   .topbar-actions .topbar-btn:hover {
     background: linear-gradient(120deg, rgba(77, 163, 255, 0.16), rgba(139, 123, 255, 0.12));
     color: var(--text);
@@ -479,38 +479,37 @@ body::before {
 /* ---------- 5-4. ヒーロー・コンポーザー ---------- */
 .composer {
   position: relative;
-  border-radius: 22px;
+  border-radius: 14px;
   padding: 18px 18px 14px;
   background: var(--sky-glass);
   border-color: var(--sky-border-glow);
   overflow: hidden;
 }
-.composer::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-violet) 45%, var(--accent-2));
-}
+/* コンポーザー上部のグラデーション帯も廃止 (2026-11-26 ユーザー要望、
+   フライトカードの帯廃止と同日) */
 .composer:focus-within { box-shadow: var(--ring), var(--shadow-card-hover); }
 .composer textarea { font-size: 15.5px; line-height: 1.65; }
 .composer-actions { border-top-style: dashed; }
-.btn { border-radius: 999px; }
+.btn { border-radius: 10px; }
 .btn-primary {
   background: linear-gradient(120deg, var(--accent) 0%, var(--accent-violet) 90%);
   color: #fff; padding-inline: 22px;
-  box-shadow: 0 10px 24px -8px rgba(96, 120, 255, 0.75);
+  box-shadow: none;
 }
+.btn-primary:hover { box-shadow: none; }
 :root[data-theme="light"] .btn-primary { color: #fff; }
-.btn-ghost { border-radius: 999px; }
+.btn-ghost { border-radius: 10px; }
 
-/* ---------- 5-5. 検索 = ピル ---------- */
+/* ---------- 5-5. 検索 ---------- */
 .feed-search {
-  border-radius: 999px; padding-inline: 16px;
+  border-radius: 12px; padding-inline: 16px;
   background: var(--panel);
 }
 .feed-search:focus-within { box-shadow: var(--ring); }
 
 /* ---------- 5-6. 投稿カード ---------- */
 .post {
-  border-radius: 22px;
+  border-radius: 14px;
   padding: 18px 20px;
   margin-bottom: 16px;
 }
@@ -518,13 +517,13 @@ body::before {
 .post-head .avatar, .post-head .avatar-fallback {
   box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px rgba(110, 150, 255, 0.45);
 }
-.post-actions .action-btn { border-radius: 999px; }
+.post-actions .action-btn { border-radius: 10px; }
 .post-actions .action-btn:hover { background: var(--panel-2); }
 
 /* ---------- 5-7. フライトカード = eチケット v2 ---------- */
 .flight-card, .flight-card.flight-card-rich {
   border-left: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 12px;
   padding: 16px 18px 14px;
   background:
     linear-gradient(180deg, rgba(77, 163, 255, 0.10), rgba(139, 123, 255, 0.04) 42%, rgba(126, 231, 199, 0.03)),
@@ -551,7 +550,7 @@ body::before {
 .flight-stats { gap: 8px; border-top: 1px dashed rgba(139, 150, 184, 0.4); }
 .flight-stats .stat {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 13px; padding: 8px 10px 7px;
+  border-radius: 9px; padding: 8px 10px 7px;
 }
 .flight-stats .stat b {
   background: linear-gradient(120deg, var(--accent), var(--accent-2));
@@ -560,14 +559,14 @@ body::before {
 
 /* ---------- 5-8. サイドバー・パネル = グラスカード ---------- */
 .quake-panel, .events-sidebar-panel, .vatsim-mini-panel {
-  border-radius: 20px;
+  border-radius: 14px;
   background: var(--sky-glass);
   box-shadow: var(--shadow-card);
   padding: 16px;
 }
 /* 天気は地震パネルの内側のセクションなので、二重の箱にせず区切りだけ新調する */
 .weather-section { border-top: 1px dashed var(--border); margin-top: 16px; padding-top: 16px; }
-.events-sidebar-item { border-radius: 14px; }
+.events-sidebar-item { border-radius: 10px; }
 .sidebar-leaderboard-rank {
   background: linear-gradient(135deg, var(--accent), var(--accent-violet));
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -575,9 +574,9 @@ body::before {
 }
 
 /* ---------- 5-9. モーダル / コメント ---------- */
-.modal { border-radius: 24px; padding: 24px; }
-.comment-body { border-radius: 6px 16px 16px 16px; }
-.comment-form input { border-radius: 999px; }
+.modal { border-radius: 16px; padding: 24px; }
+.comment-body { border-radius: 4px 12px 12px 12px; }
+.comment-form input { border-radius: 10px; }
 
 /* ---------- 5-10. スマホ: フローティング・ピル型タブバー ---------- */
 @media (max-width: 899.98px) {
@@ -587,23 +586,25 @@ body::before {
     bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     height: 58px;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 18px;
     background: var(--panel);
     box-shadow: 0 18px 38px -14px rgba(2, 6, 18, 0.7);
     padding-bottom: 0;
   }
   .mobile-tabbar .tab-btn { border-radius: 999px; }
-  .post { padding: 16px; border-radius: 20px; }
+  .post { padding: 16px; border-radius: 14px; }
   .flight-route-row { font-size: 22px; }
-  .composer { border-radius: 20px; padding: 16px 14px 12px; }
+  .composer { border-radius: 14px; padding: 16px 14px 12px; }
   /* 浮いたタブバー (58px + 下10px) にメモFABが重ならないよう持ち上げる */
   .memo-fab { bottom: calc(82px + env(safe-area-inset-bottom, 0px)); }
 }
 .memo-fab {
   background: linear-gradient(135deg, var(--accent), var(--accent-violet));
   color: #fff; border: none;
-  box-shadow: 0 14px 30px -10px rgba(96, 120, 255, 0.8);
+  box-shadow: var(--shadow-pop);
 }
+/* スマホ下部タブのアクティブ時の発光も止める (色とFILLだけで示す) */
+.mobile-tabbar .tab-btn.active { filter: none; }
 
 /* ================= ストーリー機能 (2026-11-26, public/stories.js) =================
    フィード上部のバー + 投稿モーダル + 全画面ビューア。
@@ -649,7 +650,7 @@ body::before {
 .story-composer-modal { max-width: 440px; }
 .story-composer-note { margin: -6px 0 12px; color: var(--text-dim); font-size: 12.5px; line-height: 1.6; }
 .story-preview {
-  position: relative; height: 300px; border-radius: 16px; overflow: hidden;
+  position: relative; height: 300px; border-radius: 12px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 12px; border: 1px solid var(--border);
 }
@@ -693,7 +694,7 @@ body::before {
   max-height: 92dvh;
   background: #000; overflow: hidden;
 }
-@media (min-width: 700px) { .story-viewer { border-radius: 20px; } }
+@media (min-width: 700px) { .story-viewer { border-radius: 14px; } }
 .story-viewer-progress {
   position: absolute; top: 10px; left: 10px; right: 10px; z-index: 5;
   display: flex; gap: 5px;
