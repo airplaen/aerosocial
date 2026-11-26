@@ -181,7 +181,7 @@
         <textarea id="story-text" maxlength="${TEXT_MAX_LEN}" rows="3" placeholder="いまの空模様は？（最大${TEXT_MAX_LEN}文字）"></textarea>
         <div class="story-composer-row">
           <div class="story-hues" id="story-hues">
-            ${HUE_PRESETS.map((h) => `<button type="button" class="story-hue" data-hue="${h}" style="background:linear-gradient(135deg,hsl(${h} 75% 55%),hsl(${h + 40} 75% 45%))" aria-label="背景色 ${h}"></button>`).join("")}
+            ${HUE_PRESETS.map((h) => `<button type="button" class="story-hue" data-hue="${h}" style="background:hsl(${h} 75% 50%)" aria-label="背景色 ${h}"></button>`).join("")}
           </div>
           <span class="story-char-count" id="story-char-count">0/${TEXT_MAX_LEN}</span>
         </div>
@@ -203,7 +203,7 @@
     const submitBtn = overlay.querySelector("#story-submit");
 
     function paintPreview() {
-      preview.style.background = `linear-gradient(160deg, hsl(${selectedHue} 72% 52%), hsl(${selectedHue + 45} 72% 40%))`;
+      preview.style.background = `hsl(${selectedHue} 72% 46%)`;
       const text = textInput.value.trim();
       previewText.textContent = text || (imageFile ? "" : "テキストを入力するとここに表示されます");
       previewText.style.display = imageFile && !text ? "none" : "";
@@ -355,7 +355,7 @@
       authorEl.innerHTML = `${avatarInner(group.user, 32)}<span class="story-viewer-name">${escapeHtml(group.user.name)}</span><span class="story-viewer-time">${fmtTime(story.createdAt)}</span>`;
       bodyEl.style.background = story.imageUrl
         ? "#000"
-        : `linear-gradient(160deg, hsl(${story.hue} 72% 52%), hsl(${story.hue + 45} 72% 40%))`;
+        : `hsl(${story.hue} 72% 46%)`;
       bodyEl.innerHTML = `
         ${story.imageUrl ? `<img class="story-viewer-img" src="${escapeHtml(story.imageUrl)}" alt="" />` : ""}
         ${story.text ? `<div class="story-viewer-text${story.imageUrl ? " story-viewer-text-overlay" : ""}">${escapeHtml(story.text)}</div>` : ""}`;
