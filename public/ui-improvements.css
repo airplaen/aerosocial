@@ -827,3 +827,17 @@ body::before {
   }
   .topbar-actions .topbar-btn .material-symbols-rounded { font-size: 20px; }
 }
+
+/* ================================================================
+   ボタンのグラデーションをなくす (2026-11-26 ユーザー要望)
+   主要ボタン (投稿など)・コメント送信・タブの選択中・メモFAB・
+   レールのホバー背景に残っていたグラデーションを単色に置き換える。
+   ロゴマークや見出し文字のグラデーションはボタンではないので対象外。
+   ================================================================ */
+.btn-primary { background: var(--accent); }
+.tabs button.active { background: var(--accent); box-shadow: none; }
+.comment-form button { background: var(--accent); border-radius: 10px; }
+.memo-fab { background: var(--accent); }
+@media (min-width: 1200px) {
+  .topbar-actions .topbar-btn:hover { background: rgba(127, 160, 255, 0.10); }
+}
