@@ -24,6 +24,7 @@ const vatsimEventRoutes = require("./routes/vatsimEvents");
 const animeImageRoutes = require("./routes/animeImage");
 const newsRoutes = require("./routes/news");
 const memoRoutes = require("./routes/memos");
+const storyRoutes = require("./routes/stories");
 const logbookRoutes = require("./routes/logbook");
 const { initWebSocket } = require("./ws");
 const { initDiscordBot } = require("./services/discordNotify");
@@ -186,6 +187,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/vatsim", vatsimEventRoutes);
 app.use("/api/memos", memoRoutes);
+app.use("/api/stories", storyRoutes);
 app.use("/api/logbook", logbookRoutes);
 
 // アニメの紹介画像(Wikipediaに無い場合のフォールバック)をJikan API

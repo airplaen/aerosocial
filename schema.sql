@@ -218,3 +218,27 @@ CREATE TABLE IF NOT EXISTS news_items (
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC);
+
+-- ストーリー機能 (24時間で消える投稿)。expires_at を過ぎたものは表示されず、
+-- routes/stories.js が読み書きのついでに遅延掃除する (行+画像ファイル)。
+-- hue はテキストストーリーの背景グラデーションの色相 (ユーザーの hue が既定)。
+CREATE TABLE IF NOT EXISTS stories (
+  id         TEXT PRIMARY KEY,
+  author_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text       TEXT,
+  image_path TEXT,
+  hue        INTEGER NOT NULL DEFAULT 200,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories (expires_at);
+CREATE INDEX IF NOT EXISTS idx_stories_author ON stories (author_id, created_at);
+
+-- ストーリーの既読記録。未読/既読のリング表示と、投稿者向け閲覧者一覧に使う。
+CREATE TABLE IF NOT EXISTS story_views (
+  story_id   TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (story_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_story_views_story ON story_views (story_id);
