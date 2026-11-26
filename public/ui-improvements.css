@@ -926,3 +926,23 @@ body::before { background: none; }
 .ptr-indicator.ptr-spinning .ptr-icon {
   animation: ptr-spin 0.7s linear infinite !important;
 }
+
+/* ================================================================
+   青い光をなくす (2026-11-26 ユーザー要望、フライトカードのスクショ)
+   フライトカードにマウスを乗せると青い影が広がるホバー演出が
+   本体だった。同種の青いホバー影 (人気フライト/イベントの行) と、
+   投稿アバターの青いリング、青みの付いたカード影も無色に揃える。
+   ================================================================ */
+.flight-card:hover { border-color: var(--border); transform: none; box-shadow: none; }
+.popular-flight-item:hover { box-shadow: none; }
+.events-sidebar-item:hover { box-shadow: none; }
+.post-head .avatar, .post-head .avatar-fallback {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px rgba(139, 150, 184, 0.4);
+}
+:root {
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.85);
+}
+:root[data-theme="light"] {
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 16px 36px -22px rgba(15, 23, 42, 0.22);
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 24px 48px -22px rgba(15, 23, 42, 0.3);
+}
