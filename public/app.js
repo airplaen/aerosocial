@@ -2639,14 +2639,14 @@
           </div>
           <div class="topbar-actions">
             <div class="ws-indicator"><span class="ws-dot" id="ws-dot"></span></div>
-            <button type="button" class="btn btn-ghost topbar-btn" id="my-posts-btn"><span class="material-symbols-rounded" aria-hidden="true">dynamic_feed</span>マイ投稿</button>
-            <button type="button" class="btn btn-ghost topbar-btn" id="events-btn"><span class="material-symbols-rounded" aria-hidden="true">event</span>イベント</button>
-            <button type="button" class="btn btn-ghost topbar-btn" id="leaderboard-btn"><span class="material-symbols-rounded" aria-hidden="true">military_tech</span>ランキング</button>
-            <button type="button" class="btn btn-ghost topbar-btn" id="news-hub-btn"><span class="material-symbols-rounded" aria-hidden="true">newspaper</span>ニュース</button>
-            <button type="button" class="btn btn-ghost topbar-btn messages-btn" id="messages-btn"><span class="material-symbols-rounded" aria-hidden="true">campaign</span>メッセージ</button>
-            <button type="button" class="btn btn-ghost topbar-btn" id="memo-btn"><span class="material-symbols-rounded" aria-hidden="true">edit_note</span>メモ</button>
-            <button type="button" class="btn btn-ghost topbar-btn" id="notif-settings-btn"><span class="material-symbols-rounded" aria-hidden="true">settings</span>設定</button>
-            ${state.isAdmin ? `<button type="button" class="btn btn-ghost topbar-btn" id="admin-panel-btn"><span class="material-symbols-rounded" aria-hidden="true">admin_panel_settings</span>管理者パネル</button>` : ""}
+            <button type="button" class="btn btn-ghost topbar-btn" id="my-posts-btn" title="マイ投稿"><span class="material-symbols-rounded" aria-hidden="true">dynamic_feed</span>マイ投稿</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="events-btn" title="イベント"><span class="material-symbols-rounded" aria-hidden="true">event</span>イベント</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="leaderboard-btn" title="ランキング"><span class="material-symbols-rounded" aria-hidden="true">military_tech</span>ランキング</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="news-hub-btn" title="ニュース"><span class="material-symbols-rounded" aria-hidden="true">newspaper</span>ニュース</button>
+            <button type="button" class="btn btn-ghost topbar-btn messages-btn" id="messages-btn" title="メッセージ"><span class="material-symbols-rounded" aria-hidden="true">campaign</span>メッセージ</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="memo-btn" title="メモ"><span class="material-symbols-rounded" aria-hidden="true">edit_note</span>メモ</button>
+            <button type="button" class="btn btn-ghost topbar-btn" id="notif-settings-btn" title="設定"><span class="material-symbols-rounded" aria-hidden="true">settings</span>設定</button>
+            ${state.isAdmin ? `<button type="button" class="btn btn-ghost topbar-btn" id="admin-panel-btn" title="管理者パネル"><span class="material-symbols-rounded" aria-hidden="true">admin_panel_settings</span>管理者パネル</button>` : ""}
             <div class="topbar-divider"></div>
             <button type="button" class="btn btn-ghost topbar-btn icon-only" id="theme-toggle-btn" title="表示モードを切り替え" aria-label="表示モードを切り替え">
               <span class="material-symbols-rounded theme-toggle-icon" aria-hidden="true">light_mode</span>

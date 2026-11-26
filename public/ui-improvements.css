@@ -809,3 +809,21 @@ body::before {
 }
 /* サイドバーのパネル見出しも狭い列で折り返さない */
 .quake-panel-title, .events-sidebar-title, .news-panel-title { white-space: nowrap; }
+
+/* ================================================================
+   ある程度小さくしたらアイコンだけにする (2026-11-26 ユーザー要望)
+   横並びヘッダーの幅が 1100px を切ったら、ナビボタンはラベルを
+   隠してアイコンだけにする (ラベルは title のツールチップで表示)。
+   ラベルはベタ書きのテキストノードなので、ボタンの font-size を 0 に
+   して消す (アイコンの span は専用サイズを持つので残る)。
+   1200px 以上の左レールではラベルが入るので対象外、900px 未満は
+   ボタン自体が非表示 (タブバーに移譲) なので対象外。
+   ================================================================ */
+@media (min-width: 900px) and (max-width: 1099.98px) {
+  .topbar-actions .topbar-btn:not(.icon-only) {
+    font-size: 0;
+    gap: 0;
+    padding: 8px 10px;
+  }
+  .topbar-actions .topbar-btn .material-symbols-rounded { font-size: 20px; }
+}
