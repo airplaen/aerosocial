@@ -4518,10 +4518,45 @@
       </div>
     `;
     document.body.appendChild(overlay);
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-    document.getElementById("detail-close").addEventListener("click", () => overlay.remove());
-    const onKey = (e) => { if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onKey); } };
+    const onKey = (e) => { if (e.key === "Escape") closeDetail(); };
+    const closeDetail = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeDetail(); });
+    document.getElementById("detail-close").addEventListener("click", closeDetail);
     document.addEventListener("keydown", onKey);
+
+    // 横スワイプ (右方向) で戻る — スマホの全画面表示向け (2026-11-26
+    // ユーザー要望)。指に追随させて右へドラッグでき、80pxを超えたら
+    // 閉じる、届かなければ元の位置に戻る。縦スクロールと競合しない
+    // よう、横移動が縦移動より大きいときだけ追随する。入力欄や地図の
+    // 上から始まったスワイプでは発動しない。
+    const detailModal = overlay.querySelector(".post-detail-modal");
+    let swipeStart = null;
+    overlay.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1 || e.target.closest("input, textarea, select, .leaflet-container")) {
+        swipeStart = null;
+        return;
+      }
+      swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      detailModal.style.transition = "none";
+    }, { passive: true });
+    overlay.addEventListener("touchmove", (e) => {
+      if (!swipeStart) return;
+      const dx = e.touches[0].clientX - swipeStart.x;
+      const dy = e.touches[0].clientY - swipeStart.y;
+      detailModal.style.transform = dx > 0 && dx > Math.abs(dy) ? `translateX(${dx}px)` : "";
+    }, { passive: true });
+    overlay.addEventListener("touchend", (e) => {
+      if (!swipeStart) return;
+      const dx = e.changedTouches[0].clientX - swipeStart.x;
+      const dy = e.changedTouches[0].clientY - swipeStart.y;
+      swipeStart = null;
+      detailModal.style.transition = "transform 0.18s ease";
+      if (dx > 80 && Math.abs(dy) < 60) {
+        closeDetail();
+      } else {
+        detailModal.style.transform = "";
+      }
+    }, { passive: true });
 
     function renderDetail() {
       if (!document.body.contains(overlay)) return;
