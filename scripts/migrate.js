@@ -314,12 +314,10 @@ function main() {
   db.exec("CREATE INDEX IF NOT EXISTS idx_news_items_published ON news_items (published_at DESC)");
   console.log("Ensured news_items table exists.");
 
-  // --- 気象警報・注意報 (地震情報パネル下部) --------------------------
-  // ユーザーが選んだ地域(気象庁の府県予報区コード)。null = 未選択/機能
-  // オフ。scripts/weather-warning-push-bridge.js がこの列を持つユーザー
-  // だけを対象に、選んだ地域の警報・注意報が更新されていないか定期的に
-  // チェックする。avatar_path/google_id/notify_pref と同じ
-  // add-column-if-missing パターン。
+  // --- 気象警報・注意報 (2026-11-26 に機能ごと撤去済み) --------------
+  // ユーザーが選んだ地域を保存していた列。機能は撤去したが、既存DBとの
+  // 互換のため列の追加マイグレーション自体は残す (列は未使用になる)。
+  // avatar_path/google_id/notify_pref と同じ add-column-if-missing パターン。
   try {
     db.exec("ALTER TABLE users ADD COLUMN warning_area_code TEXT");
     console.log("Added warning_area_code column to users.");
