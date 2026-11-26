@@ -888,3 +888,23 @@ body::before { background: none; }
 .warning-bar { background: color-mix(in srgb, var(--bg) 88%, #ff9f43); }
 .announcement-bar { background: color-mix(in srgb, var(--bg) 90%, var(--accent)); }
 .news-flash-popup { background: color-mix(in srgb, var(--bg) 88%, #ff8c5c); }
+
+/* ================================================================
+   ホバーで光らせない (2026-11-26 ユーザー要望)
+   マウスを当てたときの明るくなる/光る演出をやめる。背景色が
+   フラットに変わるだけのホバー (ghostボタン等) は操作の手がかり
+   として残す。あわせて、スクロールバーのつまみに残っていた
+   グラデーションも単色化する (グラデーション全廃の漏れ)。
+   ================================================================ */
+.btn-primary:hover { filter: none; }
+.btn-danger:hover { filter: none; }
+.comment-form button:hover { filter: none; }
+.news-detail-link:hover { filter: none; }
+.post-image:hover, .post-image-grid-item:hover { filter: none; }
+.post:hover { border-color: rgba(139, 150, 184, 0.55); }
+::-webkit-scrollbar-thumb { background: rgba(110, 130, 190, 0.5); }
+::-webkit-scrollbar-thumb:hover { background: rgba(110, 130, 190, 0.75); }
+::-webkit-scrollbar-thumb:active { background: rgba(110, 130, 190, 0.9); }
+@media (min-width: 1200px) {
+  .topbar-actions .topbar-btn:hover { box-shadow: none; }
+}
