@@ -25,14 +25,20 @@
 //   したが、本番サーバーのIPからはブロック/失敗することがあり不安定
 //   だった。どちらも「Googleの非公開の内部動作に依存する」という点で
 //   壊れやすかったため、今はその依存を完全にやめ、記事タイトルから
-//   ざっくり分類したカテゴリに応じて LoremFlickr(https://loremflickr.com、
-//   APIキー不要のタグ指定型ストックフォトサービス)の画像URLを直接組み
-//   立てるだけにしている(下のbuildStockImageUrl参照)。サーバー側で
-//   何かをfetchする必要が無い — 画像自体はブラウザがimg srcとして直接
-//   loremflickr.comへリクエストする — ので、Google側の変更や本番IPの
-//   ブロックに影響されない。ただし実際の記事写真ではなく「それっぽい」
-//   雰囲気写真である点に注意(linkはRSSのGoogle Newsリンクのまま —
-//   クリックすればブラウザ上で正しく配信元記事へ飛ぶ)。
+//   ざっくり分類したカテゴリに応じてストック写真のURLを直接組み立てる
+//   だけにしている(下のbuildStockImageUrl参照)。サーバー側で何かを
+//   fetchする必要が無い — 画像自体はブラウザがimg srcとして直接CDNへ
+//   リクエストする — ので、Google側の変更や本番IPのブロックに影響され
+//   ない。ただし実際の記事写真ではなく「それっぽい」雰囲気写真である
+//   点に注意(linkはRSSのGoogle Newsリンクのまま — クリックすれば
+//   ブラウザ上で正しく配信元記事へ飛ぶ)。
+//
+//   写真の供給元は当初 LoremFlickr(タグ指定型)だったが、2026-11-26 に
+//   全リクエストが500を返すようになり使用不能になったため、カテゴリ
+//   ごとに実在確認済みの Unsplash CDN (images.unsplash.com) の写真IDを
+//   プールしておく方式に切り替えた(切り替え時に全IDの200応答を確認)。
+//   起動時にはDB内の旧LoremFlickr URLも自動で書き換える
+//   (backfillStockImageUrls)。
 //
 // 必要な環境変数(すべて省略可 — APIキーは不要):
 //   NEWS_POLL_INTERVAL_MS  省略可。既定120000(2分)。RSSは軽いエンドポイント
@@ -129,7 +135,7 @@ function categorizeTitle(title) {
 }
 
 // 同じ記事なら(ページを再読み込みしても)毎回同じ写真になるよう、
-// idから決定的なロック番号を作る(LoremFlickrの?lockパラメータ用)。
+// idから決定的な数を作る(写真プールからの選択用)。
 function hashToPositiveInt(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
@@ -138,9 +144,29 @@ function hashToPositiveInt(str) {
   return Math.abs(h) % 100000;
 }
 
+// カテゴリ(tags)ごとの写真プール。images.unsplash.com の写真IDで、
+// 2026-11-26 の切り替え時に全て200応答を確認済み。記事idのハッシュで
+// プール内から決定的に1枚選ぶので、同じ記事は常に同じ写真になる。
+const STOCK_PHOTO_POOLS = {
+  "disaster,storm": ["1504608524841-42fe6f032b4b", "1534088568595-a066f410bcda"],
+  "weather,sky": ["1504608524841-42fe6f032b4b", "1534088568595-a066f410bcda"],
+  "sports,stadium": ["1461896836934-ffe607ba8211", "1522778119026-d647f0596c20"],
+  "business,finance": ["1611974789855-9c2a0a7236a3", "1590283603385-17ffb3a7f29f", "1486406146926-c627a92ad1ab"],
+  "politics,government": ["1529107386315-e1a2ed48a620", "1504711434969-e33886168f5c"],
+  "technology,computer": ["1518770660439-4636190af475", "1496181133206-80ce9b88a853", "1550751827-4bd374c3f58b"],
+  "crime,police": ["1589829545856-d10d557cf95f", "1453873531674-2151bcd01707"],
+  "accident,emergency": ["1453873531674-2151bcd01707", "1504608524841-42fe6f032b4b"],
+  "entertainment,stage": ["1470229722913-7c0e2dbbafd3", "1501281668745-f7f57925c3b4", "1489599849927-2ee91cede3ba"],
+  "health,medical": ["1576091160399-112ba8d25d1d", "1579684385127-1ef15d508118", "1538108149393-fbbd81895907"],
+  "education,school": ["1503676260728-1c00da094a0b", "1509062522246-3755977927d7"],
+  "aviation,transportation": ["1436491865332-7a61a109cc05", "1474487548417-781cb71495f3", "1544620347-c4fd4a3d5957"],
+};
+const DEFAULT_STOCK_PHOTOS = ["1504711434969-e33886168f5c", "1493976040374-85c8e12f0c0e", "1480796927426-f609979314bd"];
+
 function buildStockImageUrl(tags, id) {
-  const lock = hashToPositiveInt(id);
-  return `https://loremflickr.com/640/360/${tags.map(encodeURIComponent).join(",")}?lock=${lock}`;
+  const pool = STOCK_PHOTO_POOLS[tags.join(",")] || DEFAULT_STOCK_PHOTOS;
+  const photoId = pool[hashToPositiveInt(id) % pool.length];
+  return `https://images.unsplash.com/photo-${photoId}?auto=format&fit=crop&w=640&h=360&q=60`;
 }
 
 function parseRssItems(xml) {
@@ -278,10 +304,29 @@ function backfillMissingCategories() {
   console.log(`[newsFeed] 既存記事${rows.length}件のカテゴリーを分類しました。`);
 }
 
+// LoremFlickr が500を返すようになった件の自己修復: DBに残っている旧URLを
+// タイトルから再分類して新しいプール方式のURLに書き換える(起動時に1回)。
+function backfillStockImageUrls() {
+  const rows = db.raw.prepare(
+    `SELECT id, title FROM news_items WHERE image_url LIKE '%loremflickr.com%'`
+  ).all();
+  if (!rows.length) return;
+  const update = db.raw.prepare(`UPDATE news_items SET image_url = ? WHERE id = ?`);
+  const runAll = db.raw.transaction((items) => {
+    for (const row of items) {
+      const { tags } = categorizeTitle(row.title);
+      update.run(buildStockImageUrl(tags, row.id), row.id);
+    }
+  });
+  runAll(rows);
+  console.log(`[newsFeed] 既存記事${rows.length}件の画像URLをLoremFlickrから移行しました。`);
+}
+
 function startNewsFeed() {
   if (pollTimer) return; // 二重起動防止
-  console.log(`[newsFeed] Google News RSS (${LANGUAGE_CODE}/${COUNTRY_CODE}) のポーリングを開始します（間隔: ${POLL_INTERVAL_MS}ms）。画像はLoremFlickrのカテゴリ別ストック写真を使用。`);
+  console.log(`[newsFeed] Google News RSS (${LANGUAGE_CODE}/${COUNTRY_CODE}) のポーリングを開始します（間隔: ${POLL_INTERVAL_MS}ms）。画像はUnsplash CDNのカテゴリ別ストック写真を使用。`);
   backfillMissingCategories();
+  backfillStockImageUrls();
   pollOnce();
   pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
 }
