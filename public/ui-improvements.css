@@ -916,12 +916,16 @@ body::before { background: none; }
    一切動かず、表示は即時に切り替わる)。例外は引っ張って更新の
    スピナーだけ (読み込み中かどうかを示す機能のため)。
    ストーリーの進行バーはJS駆動なので影響を受けない。
+   ※同日夜のユーザー要望で、スマホ版 (900px未満) ではアニメーション
+   を有効に戻したため、無効化は 900px 以上に限定している。
    ================================================================ */
-*, *::before, *::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
-  scroll-behavior: auto !important;
+@media (min-width: 900px) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 .ptr-indicator.ptr-spinning .ptr-icon {
   animation: ptr-spin 0.7s linear infinite !important;
@@ -980,4 +984,23 @@ body::before { background: none; }
   .event-card:hover, .logbook-recent-row:hover, .poll-option-btn:hover,
   .weather-candidate-chip:hover, .profile-tab-btn:hover, .news-hub-tab:hover,
   .news-hub-back:hover { border-color: var(--border); }
+}
+
+/* ================================================================
+   スマホ版ではアニメーションを有効にする (2026-11-26 ユーザー要望)
+   エフェクト全廃はPC (900px以上) のみに限定し、スマホでは元の
+   アニメーション/トランジションがそのまま動く。あわせて、前回の
+   全止めで潰した「押したとき」の変形もスマホでは元の値に戻す
+   (下部タブの縮小、ストーリーのリング縮小、ボタンの沈み込み等)。
+   タップハイライトの点滅オフと、貼り付きホバーの枠色リセットは
+   アニメーションとは別物なのでスマホでも維持する。
+   ================================================================ */
+@media (max-width: 899.98px) {
+  .btn:active { transform: translateY(1px) scale(0.99); }
+  .mobile-tabbar .tab-btn:active { transform: scale(0.88); }
+  .story-cell:active .story-ring { transform: scale(0.94); }
+  .memo-fab:active { transform: scale(0.94); }
+  .modal-close:active { transform: scale(0.9); }
+  .news-hub-back:active { transform: scale(0.94); }
+  #theme-toggle-btn:active .material-symbols-rounded { transform: rotate(20deg); }
 }
