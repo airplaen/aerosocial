@@ -396,8 +396,9 @@ img, video, iframe { max-width: 100%; }
       v3以前のスクロールカクつきは再発しない (静止した1枚絵)。
    3. ヒーロー・コンポーザー: 投稿欄をフィードの顔にする。グラデの
       ヘアライン + 大きめの余白 + グラデのピル型投稿ボタン。
-   4. eチケット v2: フライトカードは左の色帯をやめ、上部グラデ帯 +
-      点線ルートの中央に飛行機バッジ + 数値はピル型チップに。
+   4. eチケット v2: フライトカードは左の色帯をやめ、点線ルートの
+      中央に右向きの飛行機バッジ + 数値はピル型チップに。
+      (当初あった上部グラデ帯は 2026-11-26 のユーザー要望で廃止)
    5. ソフト&ラウンド: 角丸は 20〜24px に拡大、影は色付きで柔らかく。
       ボタン/チップ/検索は全てピル形に統一する。
 
@@ -530,20 +531,21 @@ body::before {
     var(--panel-2);
   overflow: hidden; position: relative;
 }
-.flight-card::before, .flight-card.flight-card-rich::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-violet) 50%, var(--accent-2));
-}
+/* カード上部のレインボー帯は廃止 (2026-11-26 ユーザー要望) */
 .flight-route-row { font-size: 27px; gap: 14px; }
 .flight-route-row .flight-arrow {
   border-top: 2px dashed rgba(139, 150, 184, 0.55);
   position: relative; overflow: visible;
 }
 .flight-route-row .flight-arrow::after {
-  content: "✈"; position: absolute; left: 50%; top: 0;
+  /* ✈ の絵文字グリフは端末ごとに向きが違い、下向きに見えることがあった。
+     Material Symbols の flight (元は上向き) を90°回して右向き (進行方向)
+     に固定する。 */
+  content: "flight"; position: absolute; left: 50%; top: 0;
+  font-family: "Material Symbols Rounded";
   transform: translate(-50%, -50%) rotate(90deg);
-  font-size: 13px; line-height: 1; color: var(--accent);
-  background: var(--panel-2); padding: 3px 5px; border-radius: 999px;
+  font-size: 17px; line-height: 1; color: var(--accent);
+  background: var(--panel-2); padding: 3px; border-radius: 999px;
 }
 .flight-badge { border-radius: 999px; background: rgba(127, 160, 255, 0.08); }
 .flight-stats { gap: 8px; border-top: 1px dashed rgba(139, 150, 184, 0.4); }
