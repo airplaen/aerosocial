@@ -380,3 +380,225 @@ img, video, iframe { max-width: 100%; }
 .comment-form-avatar .avatar {
   box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px rgba(122, 156, 255, 0.35);
 }
+
+/* =====================================================================
+   AeroSocial UI v5 — "Sky Deck" (2026-11-26, Muse design)
+   ---------------------------------------------------------------------
+   コンセプト: 「出発ロビーのガラス越しに見える朝の空」
+   v4 (左サイドバー + 搭乗券カード) の情報設計はそのままに、見た目を
+   根本から作り替える。
+
+   1. フローティング・ナビ: ナビは画面端に張り付かせず、四角を大きく
+      丸めた「浮いたカード」にする (PC=左に浮くパネル / それ以外=
+      上に浮くピル / スマホ=下に浮くピル型タブバー)。
+   2. オーロラ・スカイ: 背景に 夜明けの空 (青→紫→ミント→淡い金) の
+      柔らかい光を敷く。描画は body::before の固定レイヤーだけなので
+      v3以前のスクロールカクつきは再発しない (静止した1枚絵)。
+   3. ヒーロー・コンポーザー: 投稿欄をフィードの顔にする。グラデの
+      ヘアライン + 大きめの余白 + グラデのピル型投稿ボタン。
+   4. eチケット v2: フライトカードは左の色帯をやめ、上部グラデ帯 +
+      点線ルートの中央に飛行機バッジ + 数値はピル型チップに。
+   5. ソフト&ラウンド: 角丸は 20〜24px に拡大、影は色付きで柔らかく。
+      ボタン/チップ/検索は全てピル形に統一する。
+
+   実装方針は従来通り: styles.css / app.js は触らず、この上書きシートの
+   末尾に集約する (このブロックが最後にある = 同じ詳細度なら勝つ)。
+   色は全て既存トークン経由なのでライト/ダーク両テーマで成立する。
+   ===================================================================== */
+
+/* ---------- 5-0. トークン ---------- */
+:root {
+  --radius: 20px;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 36px -20px rgba(2, 6, 18, 0.75);
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(20, 60, 160, 0.55);
+  --sky-glass: linear-gradient(165deg, rgba(77, 163, 255, 0.09), rgba(139, 123, 255, 0.05) 48%, rgba(126, 231, 199, 0.05)), var(--panel);
+  --sky-border-glow: rgba(96, 150, 255, 0.38);
+}
+:root[data-theme="light"] {
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 16px 36px -22px rgba(30, 48, 96, 0.28);
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 24px 48px -22px rgba(30, 64, 160, 0.35);
+  --sky-glass: linear-gradient(165deg, rgba(47, 127, 224, 0.07), rgba(106, 86, 232, 0.04) 48%, rgba(21, 154, 118, 0.04)), var(--panel);
+  --sky-border-glow: rgba(47, 127, 224, 0.35);
+}
+
+/* ---------- 5-1. オーロラ・スカイ背景 ---------- */
+body::before {
+  background:
+    radial-gradient(760px 420px at 8% -6%, rgba(255, 180, 84, 0.10) 0%, rgba(255, 180, 84, 0) 55%),
+    radial-gradient(900px 520px at 14% -10%, rgba(139, 123, 255, 0.22) 0%, rgba(139, 123, 255, 0) 62%),
+    radial-gradient(1100px 640px at 88% -4%, rgba(77, 163, 255, 0.20) 0%, rgba(77, 163, 255, 0) 58%),
+    radial-gradient(1400px 900px at 50% 118%, rgba(126, 231, 199, 0.12) 0%, rgba(126, 231, 199, 0) 62%);
+}
+:root[data-theme="light"] body::before { opacity: 0.65; }
+
+/* ---------- 5-2. ブランド ---------- */
+.brand-mark {
+  width: 38px; height: 38px; border-radius: 13px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-violet) 55%, var(--accent-2) 130%);
+  box-shadow: 0 8px 20px -6px rgba(90, 130, 255, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+}
+.brand-mark .material-symbols-rounded { font-size: 21px; }
+.brand-name { font-size: 19px; letter-spacing: 0.015em; }
+
+/* ---------- 5-3. フローティング・ナビ (共通) ---------- */
+.topbar {
+  background: var(--sky-glass);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-card);
+}
+.topbar::after { display: none; }
+.topbar-btn { border-radius: 999px; }
+@media (max-width: 1199.98px) {
+  .topbar {
+    top: 10px;
+    margin: 10px 0 18px;
+    padding: 10px 14px;
+  }
+}
+@media (min-width: 1200px) {
+  .app-shell { padding-top: 16px; column-gap: 20px; }
+  .topbar {
+    top: 16px;
+    height: calc(100dvh - 32px);
+    border-radius: 22px;
+    border-right: 1px solid var(--border);
+    padding: 18px 12px 14px;
+  }
+  .topbar-actions .topbar-btn { border-radius: 14px; padding: 11px 14px; }
+  .topbar-actions .topbar-btn:hover {
+    background: linear-gradient(120deg, rgba(77, 163, 255, 0.16), rgba(139, 123, 255, 0.12));
+    color: var(--text);
+    box-shadow: 0 0 0 1px var(--sky-border-glow) inset;
+  }
+  .topbar-actions .topbar-btn .material-symbols-rounded { color: var(--accent); }
+  .sidebar { top: 16px; max-height: calc(100dvh - 32px); }
+}
+
+/* ---------- 5-4. ヒーロー・コンポーザー ---------- */
+.composer {
+  position: relative;
+  border-radius: 22px;
+  padding: 18px 18px 14px;
+  background: var(--sky-glass);
+  border-color: var(--sky-border-glow);
+  overflow: hidden;
+}
+.composer::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-violet) 45%, var(--accent-2));
+}
+.composer:focus-within { box-shadow: var(--ring), var(--shadow-card-hover); }
+.composer textarea { font-size: 15.5px; line-height: 1.65; }
+.composer-actions { border-top-style: dashed; }
+.btn { border-radius: 999px; }
+.btn-primary {
+  background: linear-gradient(120deg, var(--accent) 0%, var(--accent-violet) 90%);
+  color: #fff; padding-inline: 22px;
+  box-shadow: 0 10px 24px -8px rgba(96, 120, 255, 0.75);
+}
+:root[data-theme="light"] .btn-primary { color: #fff; }
+.btn-ghost { border-radius: 999px; }
+
+/* ---------- 5-5. 検索 = ピル ---------- */
+.feed-search {
+  border-radius: 999px; padding-inline: 16px;
+  background: var(--panel);
+}
+.feed-search:focus-within { box-shadow: var(--ring); }
+
+/* ---------- 5-6. 投稿カード ---------- */
+.post {
+  border-radius: 22px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.post:hover { border-color: var(--sky-border-glow); }
+.post-head .avatar, .post-head .avatar-fallback {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px rgba(110, 150, 255, 0.45);
+}
+.post-actions .action-btn { border-radius: 999px; }
+.post-actions .action-btn:hover { background: var(--panel-2); }
+
+/* ---------- 5-7. フライトカード = eチケット v2 ---------- */
+.flight-card, .flight-card.flight-card-rich {
+  border-left: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px 18px 14px;
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.10), rgba(139, 123, 255, 0.04) 42%, rgba(126, 231, 199, 0.03)),
+    var(--panel-2);
+  overflow: hidden; position: relative;
+}
+.flight-card::before, .flight-card.flight-card-rich::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-violet) 50%, var(--accent-2));
+}
+.flight-route-row { font-size: 27px; gap: 14px; }
+.flight-route-row .flight-arrow {
+  border-top: 2px dashed rgba(139, 150, 184, 0.55);
+  position: relative; overflow: visible;
+}
+.flight-route-row .flight-arrow::after {
+  content: "✈"; position: absolute; left: 50%; top: 0;
+  transform: translate(-50%, -50%) rotate(90deg);
+  font-size: 13px; line-height: 1; color: var(--accent);
+  background: var(--panel-2); padding: 3px 5px; border-radius: 999px;
+}
+.flight-badge { border-radius: 999px; background: rgba(127, 160, 255, 0.08); }
+.flight-stats { gap: 8px; border-top: 1px dashed rgba(139, 150, 184, 0.4); }
+.flight-stats .stat {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 13px; padding: 8px 10px 7px;
+}
+.flight-stats .stat b {
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* ---------- 5-8. サイドバー・パネル = グラスカード ---------- */
+.quake-panel, .events-sidebar-panel, .vatsim-mini-panel {
+  border-radius: 20px;
+  background: var(--sky-glass);
+  box-shadow: var(--shadow-card);
+  padding: 16px;
+}
+/* 天気は地震パネルの内側のセクションなので、二重の箱にせず区切りだけ新調する */
+.weather-section { border-top: 1px dashed var(--border); margin-top: 16px; padding-top: 16px; }
+.events-sidebar-item { border-radius: 14px; }
+.sidebar-leaderboard-rank {
+  background: linear-gradient(135deg, var(--accent), var(--accent-violet));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-size: 15px;
+}
+
+/* ---------- 5-9. モーダル / コメント ---------- */
+.modal { border-radius: 24px; padding: 24px; }
+.comment-body { border-radius: 6px 16px 16px 16px; }
+.comment-form input { border-radius: 999px; }
+
+/* ---------- 5-10. スマホ: フローティング・ピル型タブバー ---------- */
+@media (max-width: 899.98px) {
+  .app-shell { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-tabbar {
+    left: 12px; right: 12px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    height: 58px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel);
+    box-shadow: 0 18px 38px -14px rgba(2, 6, 18, 0.7);
+    padding-bottom: 0;
+  }
+  .mobile-tabbar .tab-btn { border-radius: 999px; }
+  .post { padding: 16px; border-radius: 20px; }
+  .flight-route-row { font-size: 22px; }
+  .composer { border-radius: 20px; padding: 16px 14px 12px; }
+  /* 浮いたタブバー (58px + 下10px) にメモFABが重ならないよう持ち上げる */
+  .memo-fab { bottom: calc(82px + env(safe-area-inset-bottom, 0px)); }
+}
+.memo-fab {
+  background: linear-gradient(135deg, var(--accent), var(--accent-violet));
+  color: #fff; border: none;
+  box-shadow: 0 14px 30px -10px rgba(96, 120, 255, 0.8);
+}
