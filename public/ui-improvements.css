@@ -757,3 +757,21 @@ body::before {
 .story-viewers-loading { color: var(--text-dim); font-size: 13px; padding: 6px 0; }
 .story-viewer-row { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 14px; }
 .story-viewer-row-time { margin-left: auto; color: var(--text-dim); font-size: 12px; }
+
+/* ================================================================
+   スマホ版への追随 (2026-11-26)
+   PC版で決めた「帯なし・発光なし・角は角ばらせる」を、スマホ固有の
+   UI (下から出るシート類とタブバー) にも適用する。共通部品 (ボタン /
+   カード / 投稿欄) は上のルールが画面幅を問わず効いているので、
+   ここでは styles.css 側に残っていたスマホ専用の角丸だけを上書きする。
+   ================================================================ */
+@media (max-width: 899.98px) {
+  /* ボトムシートの上角: 18〜20px → 12px */
+  .mobile-panel-sheet { border-radius: 12px 12px 0 0; }
+  .mobile-sheet-backdrop .profile-modal,
+  .mobile-sheet-backdrop .events-modal { border-radius: 12px 12px 0 0; }
+  .mobile-sheet-backdrop .vatsim-detail-modal { border-radius: 12px 12px 0 0; }
+  .modal.news-detail-modal { border-radius: 12px 12px 0 0; }
+  /* タブバー内側のボタンもピル型をやめる (外枠は 18px 済み) */
+  .mobile-tabbar .tab-btn { border-radius: 14px; }
+}

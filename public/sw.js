@@ -11,7 +11,7 @@
 // picks those up on the very next request without relying on this
 // string at all. It only exists so activate() can drop a genuinely
 // obsolete cache format if this file's own logic changes shape.
-const CACHE_VERSION = "aerosocial-shell-v20";
+const CACHE_VERSION = "aerosocial-shell-v21";
 const SHELL_ASSETS = [
   "/",
   "/app.js",
