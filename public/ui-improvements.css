@@ -841,3 +841,50 @@ body::before {
 @media (min-width: 1200px) {
   .topbar-actions .topbar-btn:hover { background: rgba(127, 160, 255, 0.10); }
 }
+
+/* ================================================================
+   グラデーション全廃 (2026-11-26 ユーザー要望)
+   ボタンに続いて、残っていた装飾グラデーションを全て単色にする。
+   対象: 空の背景・ロゴ・見出し/数値のグラデーション文字・
+   ストーリーのリング・アバター・速報バッジ等。警告系のバー/ポップ
+   アップは意味のある色味だけ単色で残す。写真の上に文字を載せる
+   ための暗いオーバーレイと、読み込みシマーだけは機能として残す。
+   ================================================================ */
+body::before { background: none; }
+.auth-wrap { background: var(--bg); }
+.auth-wrap::before { display: none; }
+.brand-mark { background: var(--accent); box-shadow: none; }
+.brand-name {
+  background: none;
+  -webkit-background-clip: initial; background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+  color: var(--text);
+}
+.flight-stats .stat b {
+  background: none;
+  -webkit-background-clip: initial; background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+  color: var(--accent);
+}
+.sidebar-leaderboard-rank {
+  background: none;
+  -webkit-background-clip: initial; background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+  color: var(--accent);
+}
+.story-ring-unseen { background: var(--accent); }
+.story-ring-mine { background: var(--accent-2); }
+.dm-avatar { background: var(--accent); }
+.popular-flights-title::before { background: var(--accent-2); box-shadow: none; }
+.poll-option-fill { background: rgba(77, 163, 255, 0.22); }
+.poll-option-result.poll-option-mine .poll-option-fill { background: rgba(126, 231, 199, 0.25); }
+.news-badge-breaking { background: var(--accent-gold); }
+.news-detail-link { background: var(--accent-gold); }
+.news-hub-tab.active { background: var(--accent-gold); box-shadow: none; }
+.news-hub-masthead { background: var(--bg); }
+.news-item-thumb-fallback { background: hsl(var(--news-hue, 28) 45% 30%); }
+.quake-eew-alert { background: color-mix(in srgb, var(--bg) 86%, #ff6b7a); }
+.eew-popup { background: color-mix(in srgb, var(--bg) 88%, #ff6b7a); }
+.warning-bar { background: color-mix(in srgb, var(--bg) 88%, #ff9f43); }
+.announcement-bar { background: color-mix(in srgb, var(--bg) 90%, var(--accent)); }
+.news-flash-popup { background: color-mix(in srgb, var(--bg) 88%, #ff8c5c); }
