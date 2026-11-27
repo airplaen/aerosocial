@@ -2400,6 +2400,9 @@
         <p class="sub" style="margin-top:10px; font-size:12px; color:var(--text-dim);">
           セキュリティ強化のため、新規アカウントの作成はGoogleログインのみとなります。
         </p>
+        <p class="sub" style="margin-top:6px; font-size:12.5px;">
+          <a href="/intro.html" style="color:var(--accent);">AeroSocial について（紹介ページ）</a>
+        </p>
         <div class="auth-divider"><span>既存のコールサインでログイン</span></div>
         <form id="auth-form">
           <div class="field">
