@@ -45,7 +45,7 @@ upload.MAX_FILES_PER_POST = MAX_FILES_PER_POST;
 // rejects oversized images after upload.
 const VIDEO_ALLOWED = new Set(["video/mp4", "video/webm"]);
 const IMAGE_MAX_BYTES = (Number(process.env.MAX_UPLOAD_MB) || 10) * 1024 * 1024;
-const VIDEO_MAX_BYTES = (Number(process.env.MAX_VIDEO_MB) || 400) * 1024 * 1024;
+const VIDEO_MAX_BYTES = (Number(process.env.MAX_VIDEO_MB) || 800) * 1024 * 1024;
 
 const uploadPostMedia = multer({
   storage,
