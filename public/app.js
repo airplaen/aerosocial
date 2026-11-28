@@ -422,9 +422,11 @@
 
   // Builds a permalink for a post and shares it via the OS share sheet
   // (mobile browsers) or copies it to the clipboard (desktop / unsupported
-  // browsers). Loading a URL with ?post=<id> is handled in boot()/openSharedPostFromUrl().
+  // browsers). Each post has its own URL (/post/<id>); opening one is
+  // handled in boot()/openSharedPostFromUrl(). The old ?post=<id> form
+  // keeps working for links shared earlier.
   async function sharePost(post) {
-    const url = `${location.origin}${location.pathname}?post=${encodeURIComponent(post.id)}`;
+    const url = `${location.origin}/post/${encodeURIComponent(post.id)}`;
     const shareText = post.text ? post.text.slice(0, 100) : `${post.authorName}さんの投稿`;
 
     if (navigator.share) {
@@ -813,13 +815,21 @@
     loadSidebarLeaderboard();
   }
 
-  // If the page was opened via a shared post link (?post=<id>), open that
-  // post's detail view. The post may be older than the feed's first page,
-  // so it's fetched individually (GET /api/posts/:id) when not already
-  // loaded, then merged into state.posts so likes/comments work normally.
+  // If the page was opened via a post permalink (/post/<id>, or the older
+  // ?post=<id> form), open that post's detail view. The post may be older
+  // than the feed's first page, so it's fetched individually
+  // (GET /api/posts/:id) when not already loaded, then merged into
+  // state.posts so likes/comments work normally.
   async function openSharedPostFromUrl() {
-    const postId = new URLSearchParams(location.search).get("post");
+    const pathMatch = location.pathname.match(/^\/post\/([^/]+)$/);
+    const postId = pathMatch
+      ? decodeURIComponent(pathMatch[1])
+      : new URLSearchParams(location.search).get("post");
     if (!postId) return;
+    openPostFromPermalink(postId);
+  }
+
+  async function openPostFromPermalink(postId) {
     if (!state.posts.some((p) => p.id === postId)) {
       try {
         const { post } = await api(`/api/posts/${encodeURIComponent(postId)}`);
@@ -831,6 +841,19 @@
     }
     openPostDetail(postId);
   }
+
+  // While a post detail is open, the address bar shows that post's own
+  // URL (/post/<id>). This shared handle lets the popstate handler below
+  // close the open detail when the browser navigates away from it.
+  let closeOpenPostDetail = null;
+  window.addEventListener("popstate", () => {
+    const m = location.pathname.match(/^\/post\/([^/]+)$/);
+    if (m) {
+      if (!closeOpenPostDetail) openPostFromPermalink(decodeURIComponent(m[1]));
+    } else if (closeOpenPostDetail) {
+      closeOpenPostDetail();
+    }
+  });
 
   async function loadFeed() {
     try {
@@ -4521,8 +4544,24 @@
       </div>
     `;
     document.body.appendChild(overlay);
+    // 投稿ごとに別URL: 開いている間はアドレスバーに /post/<id> を出す
+    // (2026-11-28 ユーザー要望)。パーマリンクから直接開いた場合は
+    // すでにそのURLなので push しない。閉じたら "/" に戻す (ブラウザの
+    // 戻る/進むで閉じた場合だけは履歴を触らない)。
+    if (location.pathname !== `/post/${postId}`) {
+      history.pushState({ postDetail: postId }, "", `/post/${postId}`);
+    }
     const onKey = (e) => { if (e.key === "Escape") closeDetail(); };
-    const closeDetail = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+    const closeDetail = (fromPopstate = false) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+      if (closeOpenPostDetail === closeThisDetail) closeOpenPostDetail = null;
+      if (!fromPopstate && /^\/post\//.test(location.pathname)) {
+        history.pushState(null, "", "/");
+      }
+    };
+    const closeThisDetail = () => closeDetail(true);
+    closeOpenPostDetail = closeThisDetail;
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closeDetail(); });
     document.getElementById("detail-close").addEventListener("click", closeDetail);
     document.addEventListener("keydown", onKey);
@@ -4563,7 +4602,7 @@
 
     function renderDetail() {
       if (!document.body.contains(overlay)) return;
-      if (!state.posts.some((p) => p.id === postId)) { overlay.remove(); return; }
+      if (!state.posts.some((p) => p.id === postId)) { closeDetail(); return; }
       const slot = document.getElementById("detail-post-slot");
       if (!slot) return;
       slot.innerHTML = renderPostHtml(post);
