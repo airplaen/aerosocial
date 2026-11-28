@@ -1032,3 +1032,66 @@ body::before { background: none; }
   background: #000;
   border: 1px solid var(--border);
 }
+
+/* ================================================================
+   枠をもっと角ばらせる (2026-11-28 ユーザー要望)
+   角丸は最小限にする: 大きな枠 (カード/パネル/モーダル等) は 6px、
+   小さな枠 (ボタン/入力欄/チップ/行/サムネイル等) は 4px、
+   下から出るシートは上の角だけ 6px、吹き出しは 6px+2px。
+   アバターやストーリーのリング、ドット、プログレスバーなどの
+   「円そのもの」の要素は対象外 (丸のまま)。
+   ================================================================ */
+:root { --radius: 6px; }
+.topbar, .composer, .post, .modal, .auth-wrap,
+.quake-panel, .events-sidebar-panel, .vatsim-mini-panel, .news-panel,
+.popular-flights, .flight-card, .flight-card.flight-card-rich,
+.youtube-card, .news-hub-hero, .news-hub-card, .story-viewer,
+.poll-builder, .tabs, .feed-search, .badge-card, .admin-stat-card,
+.admin-linechart-wrap, .news-flash-popup, .eew-popup, .quake-eew-alert,
+.memo-canvas-wrap, .ad-slot, .event-card, .anime-card,
+.search-users-section, .empty-state, .mobile-tabbar {
+  border-radius: 6px;
+}
+.quake-eew-alert::after { border-radius: 6px; }
+.post-image, .post-image-grid, .youtube-embed, .lightbox img,
+.post-video, .composer-preview-video video, .flight-detail-map,
+.memo-pip-canvas-wrap, .story-preview, .vatsim-detail-banner,
+.profile-header-banner {
+  border-radius: 6px;
+}
+.btn, .btn-ghost, .icon-btn, .topbar-btn,
+.topbar-actions .topbar-btn, .topbar-actions .topbar-btn.icon-only,
+.tabs button, .field input, .field textarea,
+.anime-editor-row input, .anime-editor-remove,
+.error-banner, .composer-preview img,
+.poll-builder-input, .poll-option-btn, .poll-option-result,
+.feed-search-clear, .popular-flight-item,
+.quake-card, .quake-map, .quake-point-chip, .quake-test-badge,
+.weather-search, .weather-candidate-chip, .weather-day-card,
+.weather-detail-tag, .weather-hourly-list, .warning-alert-select,
+.warning-alert-headlines li, .warning-bar, .announcement-bar,
+.news-item, .news-item-thumb, .events-sidebar-item,
+.news-detail-category, .news-hub-tab,
+.memo-list-item, .memo-title-input, .memo-text-input,
+.memo-canvas-toolbar input[type="color"], .memo-pip-toolbar input[type="color"],
+.flight-detail-tag, .flight-badge, .youtube-badge, .event-type-badge,
+.admin-badge, .toast, .comment-form input, .comment-form button,
+.flight-detail-route-box, .fs-route-box, .fs-navlog,
+.logbook-airport-row, .logbook-recent-row, .leaderboard-row,
+.admin-list-row, .admin-filter-row input, .admin-filter-row select,
+.admin-toggle-group, .brand-mark, .skip-link,
+.vatsim-event-card .vatsim-banner, .profile-banner-preview,
+.flight-stats .stat, .post-actions .action-btn, .story-viewer-icon-btn,
+.profile-tab-btn, .anime-card--has-image .anime-card-label,
+.mobile-tabbar .tab-btn, ::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+}
+.mobile-panel-sheet,
+.mobile-sheet-backdrop .profile-modal,
+.mobile-sheet-backdrop .events-modal,
+.mobile-sheet-backdrop .vatsim-detail-modal,
+.modal.news-detail-modal, .story-viewers-panel {
+  border-radius: 6px 6px 0 0;
+}
+.dm-bubble { border-radius: 6px 6px 6px 2px; }
+.comment-body { border-radius: 2px 6px 6px 6px; }
