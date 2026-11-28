@@ -208,7 +208,7 @@
   // Max number of images allowed on a single post (kept in sync with the
   // server-side limit in middleware/upload.js).
   const MAX_COMPOSER_IMAGES = 6;
-  const MAX_COMPOSER_VIDEO_MB = 400;
+  const MAX_COMPOSER_VIDEO_MB = 800;
   // Videos larger than one chunk are uploaded in pieces (see
   // uploadVideoInChunks): a single request through the site's edge
   // proxy is capped well below the 400MB video limit.
@@ -1133,21 +1133,37 @@
   }
 
   // Uploads a video in 50MB chunks and returns the upload id the posts
-  // endpoint claims when creating the post. Chunks go sequentially so
-  // the server can simply append them in order.
+  // endpoint claims when creating the post. Chunks are uploaded in
+  // parallel (UPLOAD_CONCURRENCY at a time, any order — the server
+  // stores them by index and concatenates on /complete), which is
+  // several times faster than sending them one by one on a typical
+  // home connection. A failed chunk is retried once; re-sending the
+  // same index is idempotent on the server.
+  const UPLOAD_CONCURRENCY = 4;
   async function uploadVideoInChunks(file, onProgress) {
     const { uploadId, chunkSize } = await api("/api/video-uploads/init", {
       method: "POST",
       body: JSON.stringify({ size: file.size, mime: file.type }),
     });
     const total = Math.ceil(file.size / chunkSize);
-    for (let i = 0; i < total; i++) {
-      const form = new FormData();
-      form.append("index", String(i));
-      form.append("chunk", file.slice(i * chunkSize, (i + 1) * chunkSize));
-      await api(`/api/video-uploads/${encodeURIComponent(uploadId)}/chunk`, { method: "POST", body: form });
-      if (onProgress) onProgress(Math.round(((i + 1) / total) * 100));
+    let nextIndex = 0;
+    let doneBytes = 0;
+    async function worker() {
+      while (nextIndex < total) {
+        const i = nextIndex++;
+        const blob = file.slice(i * chunkSize, Math.min((i + 1) * chunkSize, file.size));
+        const send = () => {
+          const form = new FormData();
+          form.append("index", String(i));
+          form.append("chunk", blob);
+          return api(`/api/video-uploads/${encodeURIComponent(uploadId)}/chunk`, { method: "POST", body: form });
+        };
+        try { await send(); } catch { await send(); }
+        doneBytes += blob.size;
+        if (onProgress) onProgress(Math.round((doneBytes / file.size) * 100));
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, total) }, () => worker()));
     await api(`/api/video-uploads/${encodeURIComponent(uploadId)}/complete`, {
       method: "POST",
       body: JSON.stringify({}),
