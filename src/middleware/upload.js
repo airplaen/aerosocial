@@ -37,4 +37,35 @@ const upload = multer({
 
 upload.MAX_FILES_PER_POST = MAX_FILES_PER_POST;
 
+// Post attachments (動画投稿, 2026-11-28): a post takes the usual images
+// plus at most one video. This needs its own multer instance because the
+// shared one above rejects non-image MIME types and caps every file at
+// the image size limit. The per-file cap here is the video cap; the
+// posts route re-checks image sizes against IMAGE_MAX_BYTES itself and
+// rejects oversized images after upload.
+const VIDEO_ALLOWED = new Set(["video/mp4", "video/webm"]);
+const IMAGE_MAX_BYTES = (Number(process.env.MAX_UPLOAD_MB) || 10) * 1024 * 1024;
+const VIDEO_MAX_BYTES = (Number(process.env.MAX_VIDEO_MB) || 100) * 1024 * 1024;
+
+const uploadPostMedia = multer({
+  storage,
+  limits: {
+    fileSize: VIDEO_MAX_BYTES,
+    files: MAX_FILES_PER_POST + 1,
+  },
+  fileFilter: (_req, file, cb) => {
+    if (file.fieldname === "video") {
+      if (!VIDEO_ALLOWED.has(file.mimetype)) {
+        return cb(new Error("対応していない動画形式です（MP4 / WebM のみ対応）。"));
+      }
+      return cb(null, true);
+    }
+    if (!ALLOWED.has(file.mimetype)) return cb(new Error("対応していない画像形式です。"));
+    cb(null, true);
+  },
+});
+uploadPostMedia.IMAGE_MAX_BYTES = IMAGE_MAX_BYTES;
+uploadPostMedia.VIDEO_MAX_BYTES = VIDEO_MAX_BYTES;
+upload.postMedia = uploadPostMedia;
+
 module.exports = upload;

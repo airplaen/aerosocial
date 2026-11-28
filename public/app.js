@@ -98,6 +98,10 @@
     error: "",
     composerFiles: [],
     composerPreviewUrls: [],
+    // Pending video attachment (動画投稿): at most one, and it excludes
+    // image attachments (the composer enforces one media kind at a time).
+    composerVideoFile: null,
+    composerVideoUrl: null,
     submitting: false,
     // A flight card fetched from SimBrief, waiting to be attached to the
     // next post the user submits from the composer.
@@ -204,6 +208,7 @@
   // Max number of images allowed on a single post (kept in sync with the
   // server-side limit in middleware/upload.js).
   const MAX_COMPOSER_IMAGES = 6;
+  const MAX_COMPOSER_VIDEO_MB = 100;
   // Kept in sync with POLL_MIN_OPTIONS/POLL_MAX_OPTIONS/POLL_MAX_OPTION_LEN
   // in src/routes/posts.js — the server re-validates these regardless, but
   // matching limits here means the composer never lets you build something
@@ -1123,10 +1128,11 @@
     render();
   }
 
-  async function createPost(text, files, flight, poll) {
+  async function createPost(text, files, flight, poll, videoFile) {
     const form = new FormData();
     if (text) form.append("text", text);
     (files || []).forEach((file) => form.append("images", file));
+    if (videoFile) form.append("video", videoFile);
     if (flight) form.append("flight", JSON.stringify(flight));
     if (poll) form.append("poll", JSON.stringify(poll));
     const { post } = await api("/api/posts", { method: "POST", body: form });
@@ -2514,6 +2520,8 @@
                 <div>
                   <button class="icon-btn" id="pick-image-btn" title="画像を追加（複数選択・貼り付け・ドラッグ＆ドロップ対応、最大${MAX_COMPOSER_IMAGES}枚）"><span class="material-symbols-rounded" aria-hidden="true">image</span></button>
                   <input type="file" id="composer-file-input" accept="image/*" multiple class="hidden-file-input" />
+                  <button class="icon-btn" id="pick-video-btn" title="動画を追加（MP4 / WebM、最大${MAX_COMPOSER_VIDEO_MB}MB、1本まで。画像との同時添付はできません）"><span class="material-symbols-rounded" aria-hidden="true">videocam</span></button>
+                  <input type="file" id="composer-video-input" accept="video/mp4,video/webm" class="hidden-file-input" />
                   <button class="icon-btn" id="pick-poll-btn" title="投票を追加"><span class="material-symbols-rounded" aria-hidden="true">bar_chart</span></button>
                 </div>
                 <div style="display:flex; gap:8px;">
@@ -2591,6 +2599,15 @@
     document.getElementById("composer-file-input").addEventListener("change", (e) => {
       addComposerFiles(e.target.files);
       e.target.value = ""; // allow re-selecting the same file(s) later
+    });
+
+    document.getElementById("pick-video-btn").addEventListener("click", () => {
+      document.getElementById("composer-video-input").click();
+    });
+
+    document.getElementById("composer-video-input").addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) setComposerVideo(e.target.files[0]);
+      e.target.value = ""; // allow re-selecting the same file later
     });
 
     document.getElementById("composer-submit").addEventListener("click", onSubmitPost);
@@ -3536,6 +3553,10 @@
   function addComposerFiles(fileList) {
     const files = Array.from(fileList || []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
+    if (state.composerVideoFile) {
+      toast("動画と画像は同時に添付できません。先に動画を外してください。");
+      return;
+    }
     const room = MAX_COMPOSER_IMAGES - state.composerFiles.length;
     if (room <= 0) {
       toast(`画像は最大${MAX_COMPOSER_IMAGES}枚までです。`);
@@ -3557,11 +3578,40 @@
     renderComposerPreview();
   }
 
+  // Attaches (or replaces) the pending video. MP4 / WebM only so every
+  // browser can play it back; the size cap matches the server's
+  // MAX_VIDEO_MB default (the server re-checks regardless).
+  function setComposerVideo(file) {
+    if (!["video/mp4", "video/webm"].includes(file.type)) {
+      toast("対応している動画は MP4 / WebM のみです。");
+      return;
+    }
+    if (file.size > MAX_COMPOSER_VIDEO_MB * 1024 * 1024) {
+      toast(`動画は${MAX_COMPOSER_VIDEO_MB}MBまでです。`);
+      return;
+    }
+    if (state.composerFiles.length) {
+      toast("動画と画像は同時に添付できません。先に画像を外してください。");
+      return;
+    }
+    clearComposerVideo();
+    state.composerVideoFile = file;
+    state.composerVideoUrl = URL.createObjectURL(file);
+    renderComposerPreview();
+  }
+
+  function clearComposerVideo() {
+    if (state.composerVideoUrl) URL.revokeObjectURL(state.composerVideoUrl);
+    state.composerVideoFile = null;
+    state.composerVideoUrl = null;
+  }
+
   function renderComposerPreview() {
     const slot = document.getElementById("composer-preview-slot");
     if (!slot) return;
-    if (!state.composerPreviewUrls.length) { slot.innerHTML = ""; return; }
+    if (!state.composerPreviewUrls.length && !state.composerVideoUrl) { slot.innerHTML = ""; return; }
     slot.innerHTML = `
+      ${state.composerPreviewUrls.length ? `
       <div class="composer-preview-grid">
         ${state.composerPreviewUrls.map((url, i) => `
           <div class="composer-preview">
@@ -3569,11 +3619,23 @@
             <button class="remove-preview" data-remove-index="${i}">✕</button>
           </div>
         `).join("")}
-      </div>
+      </div>` : ""}
+      ${state.composerVideoUrl ? `
+      <div class="composer-preview composer-preview-video">
+        <video src="${state.composerVideoUrl}" controls playsinline preload="metadata"></video>
+        <button class="remove-preview" id="composer-video-remove">✕</button>
+      </div>` : ""}
     `;
     slot.querySelectorAll("[data-remove-index]").forEach((btn) => {
       btn.addEventListener("click", () => removeComposerFile(Number(btn.dataset.removeIndex)));
     });
+    const videoRemove = document.getElementById("composer-video-remove");
+    if (videoRemove) {
+      videoRemove.addEventListener("click", () => {
+        clearComposerVideo();
+        renderComposerPreview();
+      });
+    }
   }
 
   async function onSubmitPost() {
@@ -3591,17 +3653,19 @@
       poll = { options };
     }
 
-    if (!text && !state.composerFiles.length && !state.pendingFlight && !poll) return;
+    if (!text && !state.composerFiles.length && !state.composerVideoFile && !state.pendingFlight && !poll) return;
     const btn = document.getElementById("composer-submit");
     btn.disabled = true;
     btn.textContent = "投稿中...";
     try {
-      await createPost(text, state.composerFiles, state.pendingFlight, poll);
+      await createPost(text, state.composerFiles, state.pendingFlight, poll, state.composerVideoFile);
       textEl.value = "";
       state.composerPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
       state.composerFiles = [];
       state.composerPreviewUrls = [];
+      clearComposerVideo();
       document.getElementById("composer-file-input").value = "";
+      document.getElementById("composer-video-input").value = "";
       renderComposerPreview();
       state.pendingFlight = null;
       renderComposerFlightPreview();
@@ -4353,6 +4417,8 @@
         ${pollCardHtml(post)}
 
         ${post.imageUrls && post.imageUrls.length ? renderPostImages(post.imageUrls) : ""}
+
+        ${post.videoUrl ? `<video class="post-video" src="${escapeHtml(post.videoUrl)}" controls playsinline preload="metadata"></video>` : ""}
 
         <div class="post-actions">
           <button class="action-btn ${post.likedByMe ? "liked" : ""}" data-action="like">
