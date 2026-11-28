@@ -78,6 +78,16 @@ function main() {
     if (!/duplicate column/i.test(err.message)) throw err;
   }
 
+  // Video posts (動画投稿): one optional video per post, stored as a
+  // bare filename under the uploads dir, mirroring the legacy
+  // image_path column.
+  try {
+    db.exec("ALTER TABLE posts ADD COLUMN video_path TEXT");
+    console.log("Added video_path column to posts.");
+  } catch (err) {
+    if (!/duplicate column/i.test(err.message)) throw err;
+  }
+
 
   // For databases created before the follow feature existed: schema.sql's
   // CREATE TABLE IF NOT EXISTS above only takes effect if db.exec(sql) made

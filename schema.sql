@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS posts (
   text        TEXT,
   flight      TEXT,
   image_path  TEXT,
+  video_path  TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 

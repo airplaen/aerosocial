@@ -92,6 +92,9 @@ function serializePost(row, viewerId, poll) {
     imageUrls,
     // Kept for older client code paths — always the first image.
     imageUrl: imageUrls[0] || null,
+    // Attached video (動画投稿): at most one per post, stored as a bare
+    // filename in posts.video_path like the legacy image_path column.
+    videoUrl: row.video_path ? `/uploads/${row.video_path}` : null,
     likeCount: Number(row.like_count),
     // SQLite's EXISTS(...) yields 0/1, not a real boolean
     likedByMe: viewerId ? !!row.liked_by_me : false,
@@ -155,12 +158,12 @@ async function notifyNewPost(post, author) {
 
     const body = post.text
       ? post.text.slice(0, 100)
-      : (post.flight ? "フライトログを投稿しました" : "画像を投稿しました");
+      : (post.flight ? "フライトログを投稿しました" : post.videoUrl ? "動画を投稿しました" : "画像を投稿しました");
 
     await push.pushToUsers(userIds, {
       title: `${author.callsign}が投稿しました`,
       body,
-      url: `/?post=${post.id}`,
+      url: `/post/${post.id}`,
       tag: `post-${post.id}`,
     });
   } catch (err) {
@@ -177,19 +180,20 @@ async function notifyNewPost(post, author) {
 //
 // `files` is the multer-style array (each with a `.filename`); pass an
 // empty array for callers that never attach images (e.g. the FSA bridge).
-async function createPost({ authorId, text, flight, files, poll }) {
+async function createPost({ authorId, text, flight, files, poll, videoFile }) {
   // SQLite has no gen_random_uuid(), so the id is generated here instead
   // of relying on a column default.
   const id = crypto.randomUUID();
   await pool.query(
-    `INSERT INTO posts (id, author_id, type, text, flight)
-     VALUES ($1, $2, $3, $4, $5)`,
+    `INSERT INTO posts (id, author_id, type, text, flight, video_path)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       id,
       authorId,
       flight ? "flight" : "text",
       text?.trim() || null,
       flight ? JSON.stringify(flight) : null,
+      videoFile ? videoFile.filename : null,
     ]
   );
 
@@ -223,7 +227,7 @@ async function createPost({ authorId, text, flight, files, poll }) {
   // 作成レスポンスに影響することはない。
   notifyDiscordNewPost({
     callsign: post.authorCallsign,
-    content: post.text || (post.flight ? "フライトログを投稿しました" : null),
+    content: post.text || (post.flight ? "フライトログを投稿しました" : post.videoUrl ? "動画を投稿しました" : null),
     postId: post.id,
     imageUrls: post.imageUrls.map((p) => `${process.env.SITE_URL || ""}${p}`),
   });
@@ -323,9 +327,37 @@ router.get("/:id", optionalAuth, async (req, res) => {
 // multipart/form-data: text, flight (JSON string), images (0-6 files,
 // field repeated once per file — e.g. FormData#append("images", file) in a
 // loop on the client)
-router.post("/", requireAuth, upload.array("images", upload.MAX_FILES_PER_POST), async (req, res) => {
+// Removes every file multer saved for this request — used when a
+// validation below rejects the post, so rejected uploads don't leak
+// orphaned files into the uploads directory.
+function cleanupUploadedFiles(req) {
+  const groups = Array.isArray(req.files) ? [req.files] : Object.values(req.files || {});
+  groups.flat().forEach((f) => {
+    if (f && f.path) fs.unlink(f.path, () => {});
+  });
+}
+
+router.post(
+  "/",
+  requireAuth,
+  upload.postMedia.fields([
+    { name: "images", maxCount: upload.MAX_FILES_PER_POST },
+    { name: "video", maxCount: 1 },
+  ]),
+  async (req, res) => {
   try {
     const { text } = req.body;
+    const imageFiles = (req.files && req.files.images) || [];
+    const videoFile = (req.files && req.files.video && req.files.video[0]) || null;
+
+    // The shared per-file cap on this multer instance is the video cap,
+    // so image sizes are enforced here (see middleware/upload.js).
+    if (imageFiles.some((f) => f.size > upload.postMedia.IMAGE_MAX_BYTES)) {
+      cleanupUploadedFiles(req);
+      return res.status(400).json({
+        error: `画像は1枚あたり${Math.round(upload.postMedia.IMAGE_MAX_BYTES / 1024 / 1024)}MBまでです。`,
+      });
+    }
     let flight = null;
     if (req.body.flight) {
       try { flight = JSON.parse(req.body.flight); } catch { flight = null; }
@@ -345,30 +377,34 @@ router.post("/", requireAuth, upload.array("images", upload.MAX_FILES_PER_POST),
         : [];
       if (options.length) {
         if (!text?.trim()) {
+          cleanupUploadedFiles(req);
           return res.status(400).json({ error: "投票には質問文（本文）が必要です。" });
         }
         if (options.length < POLL_MIN_OPTIONS || options.length > POLL_MAX_OPTIONS) {
+          cleanupUploadedFiles(req);
           return res.status(400).json({ error: `選択肢は${POLL_MIN_OPTIONS}〜${POLL_MAX_OPTIONS}個にしてください。` });
         }
         if (options.some((o) => o.length > POLL_MAX_OPTION_LEN)) {
+          cleanupUploadedFiles(req);
           return res.status(400).json({ error: `選択肢は${POLL_MAX_OPTION_LEN}文字以内にしてください。` });
         }
         poll = { options };
       }
     }
 
-    const files = req.files || [];
-    if (!text?.trim() && !flight && !files.length && !poll) {
-      return res.status(400).json({ error: "本文・フライトログ・画像・投票のいずれかが必要です。" });
+    if (!text?.trim() && !flight && !imageFiles.length && !videoFile && !poll) {
+      cleanupUploadedFiles(req);
+      return res.status(400).json({ error: "本文・フライトログ・画像・動画・投票のいずれかが必要です。" });
     }
 
-    const post = await createPost({ authorId: req.user.id, text, flight, files, poll });
+    const post = await createPost({ authorId: req.user.id, text, flight, files: imageFiles, poll, videoFile });
     res.status(201).json({ post });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "投稿に失敗しました。" });
   }
-});
+  }
+);
 
 // POST /api/posts/:id/like  (toggle)
 router.post("/:id/like", requireAuth, async (req, res) => {
@@ -512,6 +548,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
     await pool.query("DELETE FROM posts WHERE id = $1", [req.params.id]);
     const uploadDir = process.env.UPLOAD_DIR || "./uploads";
     imagePaths.forEach((p) => fs.unlink(`${uploadDir}/${p}`, () => {}));
+    if (post.video_path) fs.unlink(`${uploadDir}/${post.video_path}`, () => {});
     broadcast("post:deleted", { id: req.params.id });
     res.status(204).end();
   } catch (err) {
