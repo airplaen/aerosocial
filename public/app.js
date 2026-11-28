@@ -208,7 +208,11 @@
   // Max number of images allowed on a single post (kept in sync with the
   // server-side limit in middleware/upload.js).
   const MAX_COMPOSER_IMAGES = 6;
-  const MAX_COMPOSER_VIDEO_MB = 100;
+  const MAX_COMPOSER_VIDEO_MB = 400;
+  // Videos larger than one chunk are uploaded in pieces (see
+  // uploadVideoInChunks): a single request through the site's edge
+  // proxy is capped well below the 400MB video limit.
+  const VIDEO_CHUNK_BYTES = 50 * 1024 * 1024;
   // Kept in sync with POLL_MIN_OPTIONS/POLL_MAX_OPTIONS/POLL_MAX_OPTION_LEN
   // in src/routes/posts.js — the server re-validates these regardless, but
   // matching limits here means the composer never lets you build something
@@ -1128,11 +1132,39 @@
     render();
   }
 
-  async function createPost(text, files, flight, poll, videoFile) {
+  // Uploads a video in 50MB chunks and returns the upload id the posts
+  // endpoint claims when creating the post. Chunks go sequentially so
+  // the server can simply append them in order.
+  async function uploadVideoInChunks(file, onProgress) {
+    const { uploadId, chunkSize } = await api("/api/video-uploads/init", {
+      method: "POST",
+      body: JSON.stringify({ size: file.size, mime: file.type }),
+    });
+    const total = Math.ceil(file.size / chunkSize);
+    for (let i = 0; i < total; i++) {
+      const form = new FormData();
+      form.append("index", String(i));
+      form.append("chunk", file.slice(i * chunkSize, (i + 1) * chunkSize));
+      await api(`/api/video-uploads/${encodeURIComponent(uploadId)}/chunk`, { method: "POST", body: form });
+      if (onProgress) onProgress(Math.round(((i + 1) / total) * 100));
+    }
+    await api(`/api/video-uploads/${encodeURIComponent(uploadId)}/complete`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return uploadId;
+  }
+
+  async function createPost(text, files, flight, poll, videoFile, onVideoProgress) {
     const form = new FormData();
     if (text) form.append("text", text);
     (files || []).forEach((file) => form.append("images", file));
-    if (videoFile) form.append("video", videoFile);
+    if (videoFile && videoFile.size > VIDEO_CHUNK_BYTES) {
+      const uploadId = await uploadVideoInChunks(videoFile, onVideoProgress);
+      form.append("videoUploadId", uploadId);
+    } else if (videoFile) {
+      form.append("video", videoFile);
+    }
     if (flight) form.append("flight", JSON.stringify(flight));
     if (poll) form.append("poll", JSON.stringify(poll));
     const { post } = await api("/api/posts", { method: "POST", body: form });
@@ -2511,7 +2543,7 @@
             <div class="composer" id="composer">
               <div class="composer-top">
                 ${avatarHtml(state.user, 40)}
-                <textarea id="composer-text" placeholder="フライトの様子をシェアしよう...（画像は貼り付けやドラッグ＆ドロップでも追加できます）" rows="2"></textarea>
+                <textarea id="composer-text" placeholder="フライトの様子をシェアしよう...（画像・動画は貼り付けやドラッグ＆ドロップでも追加できます）" rows="2"></textarea>
               </div>
               <div id="composer-preview-slot"></div>
               <div id="composer-flight-slot"></div>
@@ -2645,14 +2677,14 @@
       if (!items) return;
       const files = [];
       for (const item of items) {
-        if (item.kind === "file" && item.type.startsWith("image/")) {
+        if (item.kind === "file" && (item.type.startsWith("image/") || item.type.startsWith("video/"))) {
           const file = item.getAsFile();
           if (file) files.push(file);
         }
       }
       if (files.length) {
         e.preventDefault();
-        addComposerFiles(files);
+        addComposerMedia(files);
       }
     });
 
@@ -2671,7 +2703,7 @@
       if (!e.dataTransfer?.files?.length) return;
       e.preventDefault();
       composerEl.classList.remove("drag-over");
-      addComposerFiles(e.dataTransfer.files);
+      addComposerMedia(e.dataTransfer.files);
     });
 
     renderComposerPreview();
@@ -3550,6 +3582,20 @@
   // dropped onto the composer to the pending image list, enforcing
   // MAX_COMPOSER_IMAGES and silently skipping non-image files (e.g. if a
   // drop or paste also contains other file types).
+  // Routes dropped/pasted files by kind: the first video becomes the
+  // pending video attachment, images go through the usual image path.
+  // The two paths exclude each other (see setComposerVideo /
+  // addComposerFiles), so a mixed drop attaches the video and the
+  // image side explains why the images were skipped.
+  function addComposerMedia(fileList) {
+    const files = Array.from(fileList || []);
+    const video = files.find((f) => f.type.startsWith("video/"));
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (video) setComposerVideo(video);
+    if (images.length) addComposerFiles(images);
+    if (!video && !images.length) toast("対応していないファイルです。画像または動画（MP4 / WebM）をドロップしてください。");
+  }
+
   function addComposerFiles(fileList) {
     const files = Array.from(fileList || []).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
@@ -3658,7 +3704,8 @@
     btn.disabled = true;
     btn.textContent = "投稿中...";
     try {
-      await createPost(text, state.composerFiles, state.pendingFlight, poll, state.composerVideoFile);
+      await createPost(text, state.composerFiles, state.pendingFlight, poll, state.composerVideoFile,
+        (pct) => { btn.textContent = `動画をアップロード中... ${pct}%`; });
       textEl.value = "";
       state.composerPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
       state.composerFiles = [];

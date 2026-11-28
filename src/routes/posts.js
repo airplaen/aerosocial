@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const pool = require("../db");
 const { requireAuth, optionalAuth } = require("../middleware/auth");
 const upload = require("../middleware/upload");
+const { claimVideoUpload } = require("./videoUploads");
 const { broadcast } = require("../ws");
 const push = require("../lib/push");
 // Discord Bot通知。この下で定義しているプッシュ通知用の notifyNewPost と
@@ -392,12 +393,26 @@ router.post(
       }
     }
 
-    if (!text?.trim() && !flight && !imageFiles.length && !videoFile && !poll) {
+    if (!text?.trim() && !flight && !imageFiles.length && !videoFile && !req.body.videoUploadId && !poll) {
       cleanupUploadedFiles(req);
       return res.status(400).json({ error: "本文・フライトログ・画像・動画・投票のいずれかが必要です。" });
     }
 
-    const post = await createPost({ authorId: req.user.id, text, flight, files: imageFiles, poll, videoFile });
+    // Chunked video upload (routes/videoUploads.js): the file was sent
+    // in pieces ahead of this request because a single request can't
+    // exceed the edge upload cap. Claim it only now, after every other
+    // validation passed, so a rejected post never orphans the file.
+    let claimedVideoFile = videoFile;
+    if (!claimedVideoFile && req.body.videoUploadId) {
+      try {
+        claimedVideoFile = { filename: claimVideoUpload(req.body.videoUploadId, req.user.id) };
+      } catch (err) {
+        cleanupUploadedFiles(req);
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
+    const post = await createPost({ authorId: req.user.id, text, flight, files: imageFiles, poll, videoFile: claimedVideoFile });
     res.status(201).json({ post });
   } catch (err) {
     console.error(err);

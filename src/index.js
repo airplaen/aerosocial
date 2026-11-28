@@ -11,6 +11,7 @@ const crypto = require("crypto");
 
 const authRoutes = require("./routes/auth");
 const postRoutes = require("./routes/posts");
+const videoUploadRoutes = require("./routes/videoUploads");
 const userRoutes = require("./routes/users");
 const simbriefRoutes = require("./routes/simbrief");
 const weatherRoutes = require("./routes/weather");
@@ -164,6 +165,7 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
 app.use("/api/auth", authLimiter, authRoutes);
 
 app.use("/api/posts", postRoutes);
+app.use("/api/video-uploads", videoUploadRoutes);
 app.use("/api/users", userRoutes);
 
 // SimBrief calls out to an external API on every request, so keep it
